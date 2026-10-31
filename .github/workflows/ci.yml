@@ -19,14 +19,15 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - uses: gradle/actions/setup-gradle@v4
+      # v5, not v6: v6 moves caching into a proprietary component with separate terms of use.
+      - uses: gradle/actions/setup-gradle@v5
 
       - name: Android Lint, unit tests and debug APKs
         run: ./gradlew lint testDebugUnitTest assembleDebug
 
       - name: Upload test and lint reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports
           path: |
@@ -34,7 +35,7 @@ jobs:
             */build/test-results/
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: HandsFreeGPT-debug
           path: app/build/outputs/apk/debug/app-debug.apk
