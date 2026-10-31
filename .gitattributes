@@ -1,0 +1,8 @@
+# Normalise line endings: LF everywhere (so gradlew and scripts run on Linux/macOS CI), CRLF for .bat.
+* text=auto eol=lf
+*.bat text eol=crlf
+
+*.jar binary
+*.png binary
+*.gif binary
+*.apk binary

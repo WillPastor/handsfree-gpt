@@ -1,0 +1,23 @@
+# Gradle / Kotlin build output
+.gradle/
+.kotlin/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Locally built APKs to sideload (publish via GitHub Releases instead)
+/dist/
+
+# Machine-specific
+local.properties
+
+# IDEs / OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Signing keys
+*.jks
+*.keystore

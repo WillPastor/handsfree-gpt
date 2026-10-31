@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon: "Start hands-free" / "Stop hands-free". -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="start"
+        android:shortcutShortLabel="@string/shortcut_start">
+        <intent
+            android:action="com.handsfreegpt.action.START"
+            android:targetClass="com.handsfreegpt.MainActivity"
+            android:targetPackage="com.handsfreegpt" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="stop"
+        android:shortcutShortLabel="@string/shortcut_stop">
+        <intent
+            android:action="com.handsfreegpt.action.STOP"
+            android:targetClass="com.handsfreegpt.MainActivity"
+            android:targetPackage="com.handsfreegpt" />
+    </shortcut>
+</shortcuts>

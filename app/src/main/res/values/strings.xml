@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HandsFree GPT</string>
+    <string name="service_label">HandsFree GPT</string>
+    <string name="tile_label">Hands-free GPT</string>
+    <string name="shortcut_start">Start hands-free</string>
+    <string name="shortcut_stop">Stop hands-free</string>
+    <string name="label_value">%1$s: %2$s</string>
+    <string name="service_description">Presses the dictation buttons in the ChatGPT app for you: it starts dictation, listens for when you stop talking, then stops (or sends) the dictation. It only reads and taps the ChatGPT app, and the microphone is only used to detect silence. Nothing is recorded, stored or sent anywhere.</string>
+</resources>
