@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/WillPastor/handsfree-gpt/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/WillPastor/handsfree-gpt/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Android 10+" src="https://img.shields.io/badge/Android-10%2B-3DDC84?logo=android&logoColor=white">
   <img alt="Kotlin 2.2" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white">
   <img alt="No runtime dependencies" src="https://img.shields.io/badge/runtime%20dependencies-none-blue">
