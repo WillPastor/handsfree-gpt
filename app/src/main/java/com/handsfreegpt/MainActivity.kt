@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
@@ -26,6 +27,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
+import java.util.Locale
 
 /** Setup checklist, start button and settings. Plain platform views: no extra libraries. */
 class MainActivity : Activity() {
@@ -35,6 +37,8 @@ class MainActivity : Activity() {
     private lateinit var micButton: Button
     private lateinit var serviceStatus: TextView
     private lateinit var chatGptStatus: TextView
+    private lateinit var voiceStatus: TextView
+    private lateinit var downloadButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,7 +55,8 @@ class MainActivity : Activity() {
     /** Launcher shortcuts, routines (Tasker, Modes…) and adb can start/stop without the UI. */
     private fun handleAction(intent: Intent?): Boolean {
         when (intent?.action) {
-            ACTION_START -> start()
+            // "Hey Google, play HandsFree GPT" (Android Auto / Assistant media search) starts it too.
+            ACTION_START, MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> start()
             ACTION_STOP -> HandsFreeService.instance?.controller?.endSession()
             else -> return false
         }
@@ -79,8 +84,9 @@ class MainActivity : Activity() {
 
         col += text("HandsFree GPT", 26f, bold = true)
         col += text(
-            "Starts ChatGPT's dictation for you, notices when you stop talking and stops it — " +
-                "so you can use the regular ChatGPT models hands-free instead of voice mode.",
+            "Starts ChatGPT's dictation for you and finishes it when you stop talking, say \"send it\", " +
+                "or press a steering-wheel button — so you can use the regular ChatGPT models hands-free " +
+                "instead of voice mode.",
             15f,
         )
 
@@ -126,7 +132,49 @@ class MainActivity : Activity() {
         col += switch("Start listening whenever ChatGPT opens", prefs.autoListenOnOpen) { prefs.autoListenOnOpen = it }
         col += switch("Beep when listening starts and stops", prefs.beeps) { prefs.beeps = it }
 
+        col += header("Voice commands")
+        voiceStatus = text("", 15f).also { col += it }
+        downloadButton = button("Download offline speech") {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                VoiceCommandRecognizer.downloadLanguage(this)
+                toast("Follow the system prompt, then come back")
+            }
+        }.also {
+            it.visibility = View.GONE
+            col += it
+        }
+        col += switch("Finish by saying a command", prefs.voiceCommands) { prefs.voiceCommands = it }
+        col += words("Say to send", prefs.sendPhrases) { prefs.sendPhrases = it }
+        col += words("Say to stop (keeps the text so you can edit it)", prefs.stopPhrases) { prefs.stopPhrases = it }
+        col += words("Say to cancel", prefs.cancelPhrases) { prefs.cancelPhrases = it }
+        col += switch("Remove the command from my message", prefs.stripCommand) { prefs.stripCommand = it }
+        col += row(
+            button("Test voice commands") { testVoiceCommands() },
+            button("Reset phrases") {
+                prefs.resetPhrases()
+                recreate()
+            },
+        )
+        col += hint(
+            "Say the command as the very last thing, e.g. \"…what's the forecast for tomorrow, send it\". " +
+                "In the middle of a sentence it's ignored. Recognised on the phone by Android's offline speech " +
+                "recognition (Android 13+), even over road noise or music.",
+        )
+
+        col += header("Car & headset buttons")
+        col += switch("Steering-wheel and headset buttons", prefs.carButtons) { prefs.carButtons = it }
+        col += hint(
+            "Play/Pause: talk ↔ finish · Next ⏭: send · Previous ⏮: cancel · Stop: hands-free off. " +
+                "Your music pauses while hands-free is on, so the buttons reach this app.",
+        )
+        col += hint(
+            "Android Auto: HandsFree GPT is listed among the media apps, with Talk / Send / Cancel on the car " +
+                "screen. For an app not installed from Play, enable it once: Android Auto settings → tap Version " +
+                "10 times → ⋮ → Developer settings → Unknown sources.",
+        )
+
         col += header("Timing")
+        col += switch("Also stop when I go quiet", prefs.stopOnSilence) { prefs.stopOnSilence = it }
         col += slider("Stop after this much silence", 600, 5000, 100, prefs.silenceMs, ::seconds) { prefs.silenceMs = it }
         col += slider("Speech must be louder than background by", 4, 24, 1, prefs.sensitivityDb, { "$it dB" }) {
             prefs.sensitivityDb = it
@@ -188,6 +236,94 @@ class MainActivity : Activity() {
         }
         val chatGpt = runCatching { packageManager.getPackageInfo(ChatGptUi.PKG, 0).versionName }.getOrNull()
         chatGptStatus.text = if (chatGpt != null) "✅ ChatGPT $chatGpt found" else "❌ ChatGPT app not found"
+        refreshVoiceStatus()
+    }
+
+    private fun refreshVoiceStatus() {
+        val language = Locale.getDefault().displayLanguage
+        VoiceSupport.unavailableReason(this)?.let {
+            voiceStatus.text = "❌ Voice commands unavailable: $it"
+            downloadButton.visibility = View.GONE
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        voiceStatus.text = "⏳ Checking offline speech recognition…"
+        VoiceCommandRecognizer.checkLanguage(this) { installed ->
+            voiceStatus.text = when (installed) {
+                true -> "✅ Offline speech recognition ready ($language)"
+                false -> "⬇ Offline speech for $language isn't installed yet"
+                null -> "✅ On-device speech recognition available. Use Test to check it."
+            }
+            downloadButton.visibility = if (installed == false) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** Listens for 15 s and shows what was heard and which command matched: proves it works on this phone. */
+    private fun testVoiceCommands() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            return
+        }
+        VoiceSupport.unavailableReason(this)?.let { return toast("Voice commands unavailable: $it") }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val heard = text("Listening… say something that ends with \"${prefs.sendHint() ?: "send it"}\".", 15f)
+        val result = text("", 17f, bold = true)
+        val pad = dp(20)
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+            addView(heard)
+            addView(result)
+        }
+        val recognizer = VoiceCommandRecognizer(
+            this, CommandMatcher(prefs.commandPhrases()),
+            object : CommandRecognizer.Listener {
+                override fun onHeard(text: String) {
+                    heard.text = "Heard: \"$text\""
+                }
+
+                override fun onCommand(match: CommandMatcher.Match) {
+                    val what = when (match.command) {
+                        Command.SEND -> "send"
+                        Command.STOP -> "stop and keep the text"
+                        Command.CANCEL -> "cancel"
+                    }
+                    result.text = "✅ \"${match.phrase}\" → $what"
+                }
+
+                override fun onUnavailable(why: String) {
+                    result.text = "❌ $why"
+                }
+            },
+        )
+        val detector = SpeechEndDetector(
+            silenceMs = 0, sensitivityDb = prefs.sensitivityDb, noSpeechTimeoutMs = 0, maxListenMs = 15_000,
+            listener = object : SpeechEndDetector.Listener {
+                override fun onSpeaking(speaking: Boolean) = Unit
+
+                override fun onEnd(reason: SpeechTracker.End) {
+                    recognizer.stop()
+                    if (result.text.isEmpty()) result.text = "No command heard (stopped after 15 s)"
+                }
+
+                override fun onUnavailable(why: String) {
+                    recognizer.stop()
+                    result.text = "❌ Microphone: $why"
+                }
+            },
+            frameSink = recognizer::feed,
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Test voice commands")
+            .setView(body)
+            .setPositiveButton("Done", null)
+            .setOnDismissListener {
+                detector.stop()
+                recognizer.stop()
+            }
+            .show()
+        detector.start()
+        recognizer.start()
     }
 
     private fun start() {

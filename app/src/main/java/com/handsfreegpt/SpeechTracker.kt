@@ -11,6 +11,7 @@ import kotlin.math.min
  * and even speech that starts before the floor is known is picked up at the first pause.
  */
 class SpeechTracker(
+    /** Silence after speech that ends listening; 0 = never (e.g. when voice commands do the ending). */
     private val silenceMs: Int,
     private val sensitivityDb: Int,
     private val noSpeechTimeoutMs: Int,
@@ -53,7 +54,7 @@ class SpeechTracker(
         speaking = speechStarted && elapsedMs - lastVoiceAt < HANGOVER_MS
 
         return when {
-            speechStarted && elapsedMs - lastVoiceAt >= silenceMs -> End.SPEECH_ENDED
+            silenceMs > 0 && speechStarted && elapsedMs - lastVoiceAt >= silenceMs -> End.SPEECH_ENDED
             !speechStarted && noSpeechTimeoutMs > 0 && elapsedMs >= noSpeechTimeoutMs -> End.NO_SPEECH
             elapsedMs >= maxListenMs -> End.MAX_DURATION
             else -> null

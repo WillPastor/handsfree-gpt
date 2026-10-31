@@ -6,5 +6,7 @@
     <string name="shortcut_start">Start hands-free</string>
     <string name="shortcut_stop">Stop hands-free</string>
     <string name="label_value">%1$s: %2$s</string>
+    <string name="media_talk_title">Talk to ChatGPT</string>
+    <string name="media_talk_subtitle">Starts hands-free dictation on your phone</string>
     <string name="service_description">Presses the dictation buttons in the ChatGPT app for you: it starts dictation, listens for when you stop talking, then stops (or sends) the dictation. It only reads and taps the ChatGPT app, and the microphone is only used to detect silence. Nothing is recorded, stored or sent anywhere.</string>
 </resources>

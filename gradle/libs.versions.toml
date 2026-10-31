@@ -1,8 +1,10 @@
 [versions]
 agp = "9.0.1"
+androidxAnnotation = "1.11.0"
 junit = "4.13.2"
 
 [libraries]
+androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidxAnnotation" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]

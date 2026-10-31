@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Used only to detect when you stop talking; audio never leaves the phone. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Lets us find and launch the ChatGPT app (Android 11+ package visibility). -->
+    <!-- Android 11+ package visibility: launch ChatGPT, and reach the on-device speech recognizer. -->
     <queries>
         <package android:name="com.openai.chatgpt" />
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
     </queries>
 
     <application
@@ -32,6 +36,11 @@
                 <action android:name="com.handsfreegpt.action.STOP" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- Voice: "Hey Google, play HandsFree GPT" starts hands-free. -->
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
@@ -49,6 +58,22 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- Android Auto media source: its now-playing screen and steering-wheel buttons drive hands-free. -->
+        <!-- Must be exported without a permission so Android Auto (and the Assistant) can bind it. -->
+        <service
+            android:name=".HandsFreeMediaBrowser"
+            android:exported="true"
+            android:label="@string/app_name"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
 
         <service
             android:name=".HandsFreeTileService"

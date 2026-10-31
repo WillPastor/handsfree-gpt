@@ -125,7 +125,8 @@ class MainActivity : Activity() {
         bar.visibility = View.GONE
         composer.visibility = View.VISIBLE
         when (how) {
-            "stop" -> input.append("hello from dictation")
+            // Like the real app, the transcript includes everything said, spoken commands too.
+            "stop" -> input.append("Hello from dictation. Send it.")
             "send" -> send("hello from dictation")
         }
     }

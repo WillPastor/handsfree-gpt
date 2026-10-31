@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -30,6 +31,8 @@ class Snapshot(
     val send: Btn?,
     val cancel: Btn?,
     val voice: Btn?,
+    /** The composer's text field, if visible. */
+    val input: AccessibilityNodeInfo?,
     val guessed: Set<String>,
 ) {
     /** The dictation bar (X · waveform · ■ · ↑) is showing. */
@@ -45,6 +48,7 @@ class Snapshot(
         append(if (dictating) "DICTATING" else if (generating) "GENERATING" else if (idle) "IDLE" else "UNKNOWN")
         append("\n  mic=").append(mic).append("\n  stop=").append(stop).append("\n  send=").append(send)
         append("\n  cancel=").append(cancel).append("\n  voiceMode=").append(voice)
+        append("\n  input=").append(input?.let { "\"${it.text?.take(40)}\"" + if (it.isShowingHintText) " (placeholder)" else "" })
         if (guessed.isNotEmpty()) append("\n  guessed by position: ").append(guessed.joinToString())
     }
 }
@@ -63,7 +67,7 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
 
     fun snapshot(): Snapshot? {
         val root = root() ?: return null
-        val buttons = collectButtons(root)
+        val (buttons, input) = collect(root)
         val micW = Prefs.words(prefs.micWords)
         val stopW = Prefs.words(prefs.stopWords)
         val sendW = Prefs.words(prefs.sendWords)
@@ -115,7 +119,17 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
                 if (stop == null && beforeLast != cancel && unknown(beforeLast)) stop = beforeLast.also { guessed += "stop" }
             }
         }
-        return Snapshot(mic, stop, send, cancel, voice, guessed)
+        return Snapshot(mic, stop, send, cancel, voice, input, guessed)
+    }
+
+    /** What's typed in the composer ("" when it only shows its placeholder). */
+    fun composerText(input: AccessibilityNodeInfo): String =
+        if (input.isShowingHintText) "" else input.text?.toString().orEmpty()
+
+    fun setComposerText(input: AccessibilityNodeInfo, text: String): Boolean {
+        val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+        return input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            .also { Log.i(TAG, "set composer text (${text.length} chars): $it") }
     }
 
     /** Clickable things roughly on the same horizontal line as [anchor], left to right. */
@@ -125,12 +139,15 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
             .sortedBy { it.rect.centerX() }
     }
 
-    private fun collectButtons(root: AccessibilityNodeInfo): List<Btn> {
+    /** Button-like nodes in the composer area, plus the lowest text field (the composer's input). */
+    private fun collect(root: AccessibilityNodeInfo): Pair<List<Btn>, AccessibilityNodeInfo?> {
         val win = Rect().also { root.getBoundsInScreen(it) }
         // Only look at the lower part of the window, where the composer lives (it rises to mid-screen
         // when the keyboard is up), so words like "stop" or "send" in chat messages aren't buttons.
         val minY = win.top + win.height() * 0.4f
         val out = ArrayList<Btn>()
+        var input: AccessibilityNodeInfo? = null
+        var inputY = Int.MIN_VALUE
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
         var visited = 0
         while (queue.isNotEmpty() && visited < MAX_NODES) {
@@ -140,10 +157,14 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
             if (!n.isVisibleToUser) continue
             val r = Rect().also { n.getBoundsInScreen(it) }
             if (r.isEmpty || r.centerY() < minY) continue
+            if (n.isEditable && r.centerY() > inputY) {
+                input = n
+                inputY = r.centerY()
+            }
             val label = labelOf(n)
             if (n.isClickable || label.isNotEmpty()) out += Btn(n, r, label)
         }
-        return out
+        return out to input
     }
 
     private fun labelOf(n: AccessibilityNodeInfo): String {

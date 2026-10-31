@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lets Android Auto list HandsFree GPT as a media source (see HandsFreeMediaBrowser). -->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

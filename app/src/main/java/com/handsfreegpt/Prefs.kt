@@ -23,6 +23,27 @@ class Prefs(context: Context) {
     /** Used when Android won't share the microphone with us, so silence can't be detected. */
     var fallbackStopMs by intPref("fallback_stop_ms", 15000)
 
+    /** Stop when you go quiet. Can be turned off when voice commands / buttons do the ending. */
+    var stopOnSilence by boolPref("stop_on_silence", true)
+
+    var voiceCommands by boolPref("voice_commands", true)
+    var sendPhrases by stringPref("send_phrases", DEFAULT_SEND_PHRASES)
+    var stopPhrases by stringPref("stop_phrases", DEFAULT_STOP_PHRASES)
+    var cancelPhrases by stringPref("cancel_phrases", DEFAULT_CANCEL_PHRASES)
+    var stripCommand by boolPref("strip_command", true)
+
+    /** Steering-wheel / headset media buttons (and Android Auto) control hands-free. */
+    var carButtons by boolPref("car_buttons", true)
+
+    fun commandPhrases(): Map<Command, List<String>> = mapOf(
+        Command.SEND to words(sendPhrases),
+        Command.STOP to words(stopPhrases),
+        Command.CANCEL to words(cancelPhrases),
+    )
+
+    /** The first "send" phrase, for hints like `say "send it"`. */
+    fun sendHint(): String? = words(sendPhrases).firstOrNull()
+
     var autoSend by boolPref("auto_send", false)
     var autoListenOnOpen by boolPref("auto_listen_on_open", false)
     var continuous by boolPref("continuous", false)
@@ -41,6 +62,12 @@ class Prefs(context: Context) {
         stopWords = DEFAULT_STOP_WORDS
         sendWords = DEFAULT_SEND_WORDS
         cancelWords = DEFAULT_CANCEL_WORDS
+    }
+
+    fun resetPhrases() {
+        sendPhrases = DEFAULT_SEND_PHRASES
+        stopPhrases = DEFAULT_STOP_PHRASES
+        cancelPhrases = DEFAULT_CANCEL_PHRASES
     }
 
     private fun intPref(key: String, def: Int) = object : ReadWriteProperty<Any?, Int> {
@@ -67,6 +94,11 @@ class Prefs(context: Context) {
         const val DEFAULT_STOP_WORDS = "stop, done"
         const val DEFAULT_SEND_WORDS = "send, submit"
         const val DEFAULT_CANCEL_WORDS = "cancel, discard"
+
+        // Spoken at the end of a dictation. Two-word phrases rarely end a sentence by accident.
+        const val DEFAULT_SEND_PHRASES = "send it, send message"
+        const val DEFAULT_STOP_PHRASES = "stop dictation, stop listening"
+        const val DEFAULT_CANCEL_PHRASES = "cancel that, cancel message"
 
         fun words(csv: String): List<String> =
             csv.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }

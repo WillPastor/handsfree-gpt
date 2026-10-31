@@ -76,6 +76,14 @@ class SpeechTrackerTest {
     }
 
     @Test
+    fun silenceStopTurnedOff_keepsListeningUntilTheMaximum() {
+        val tracker = SpeechTracker(silenceMs = 0, sensitivityDb = 10, noSpeechTimeoutMs = 12_000, maxListenMs = 30_000)
+        val (end, at) = simulate(tracker) { t -> talking(t, 1000, 4000, -30f, -62f) }
+        assertEquals(End.MAX_DURATION, end)
+        assertEquals(30_000L, at)
+    }
+
+    @Test
     fun nonStopTalking_hitsMaxDuration() {
         val (end, at) = simulate(tracker(maxMs = 20_000)) { t -> talking(t, 500, Long.MAX_VALUE, -28f, -60f) }
         assertEquals(End.MAX_DURATION, end)
