@@ -1,38 +1,48 @@
 # Architecture
 
-HandsFree GPT is a single-module Android app in Kotlin with **no runtime dependencies**. Everything is
-built on platform APIs: an accessibility service, `AudioRecord` and plain Views.
+HandsFree GPT is a single-module Android app in Kotlin with **no runtime dependencies**. Everything is built
+on platform APIs:
+- an accessibility service
+- `AudioRecord`
+- `SpeechRecognizer`
+- `MediaSession`
+- plain Views
 
 ## Components
 
 | Class | Responsibility |
 |---|---|
-| [`HandsFreeService`](../app/src/main/java/com/handsfreegpt/HandsFreeService.kt) | The `AccessibilityService`, and the app's only privileged component. It reads ChatGPT's window, performs clicks and gestures, and hosts the overlay. It forwards events to the controller. |
-| [`DictationController`](../app/src/main/java/com/handsfreegpt/DictationController.kt) | The state machine, run by a 250 ms tick while a session is active. `startSession`, `toggleListening` and `endSession` are the only entry points, and every control surface uses them. |
-| [`ChatGptUi`](../app/src/main/java/com/handsfreegpt/ChatGptUi.kt) | Turns ChatGPT's accessibility tree into a `Snapshot`: which buttons are present and whether the composer is idle, dictating or generating. It also clicks, and writes the diagnostic UI captures. |
-| [`SpeechEndDetector`](../app/src/main/java/com/handsfreegpt/SpeechEndDetector.kt) | Audio plumbing: shares the microphone, turns 20 ms PCM frames into loudness, and notices when the platform silences it. |
-| [`SpeechTracker`](../app/src/main/java/com/handsfreegpt/SpeechTracker.kt) | Pure Kotlin that decides whether you're talking and when you've finished. It is unit-tested. |
+| [`HandsFreeService`](../app/src/main/java/com/handsfreegpt/HandsFreeService.kt) | The `AccessibilityService`, and the app's only privileged component. It reads ChatGPT's window, performs clicks and gestures, and hosts the overlay. |
+| [`DictationController`](../app/src/main/java/com/handsfreegpt/DictationController.kt) | The state machine, run by a 250 ms tick while a session is active. Every control uses its entry points `startSession`, `toggleListening`, `sendNow`, `cancelNow` and `endSession`. |
+| [`ChatGptUi`](../app/src/main/java/com/handsfreegpt/ChatGptUi.kt) | Turns ChatGPT's accessibility tree into a `Snapshot`: the buttons, the composer's text box, and whether it's idle, dictating or generating. It also clicks, sets the composer text, and writes the diagnostic UI captures. |
+| [`SpeechEndDetector`](../app/src/main/java/com/handsfreegpt/SpeechEndDetector.kt) | Shares the microphone and splits each 20 ms frame two ways: loudness goes to `SpeechTracker`, and the raw audio goes to the command recogniser. |
+| [`SpeechTracker`](../app/src/main/java/com/handsfreegpt/SpeechTracker.kt) | Pure Kotlin that decides whether you're talking and when you've gone quiet. Unit-tested. |
+| [`VoiceCommands`](../app/src/main/java/com/handsfreegpt/VoiceCommands.kt) | Pure Kotlin `CommandMatcher`, which spots "…send it" at the very end of what you said, plus `stripTrailingCommand`. Unit-tested. |
+| [`VoiceCommandRecognizer`](../app/src/main/java/com/handsfreegpt/VoiceCommandRecognizer.kt) | Android's **on-device** `SpeechRecognizer`, fed our audio through a pipe. It sits behind a small `CommandRecognizer` interface and needs Android 13+. |
+| [`MediaControls`](../app/src/main/java/com/handsfreegpt/MediaControls.kt), [`HandsFreeMediaBrowser`](../app/src/main/java/com/handsfreegpt/HandsFreeMediaBrowser.kt) | The media session behind steering-wheel, headset and Android Auto buttons, and the Android Auto media source. |
 | [`StatusOverlay`](../app/src/main/java/com/handsfreegpt/StatusOverlay.kt) | The floating pill: a `TYPE_ACCESSIBILITY_OVERLAY` window that also keeps the screen on. |
-| [`HandsFreeTileService`](../app/src/main/java/com/handsfreegpt/HandsFreeTileService.kt), [`MainActivity`](../app/src/main/java/com/handsfreegpt/MainActivity.kt) | Control surfaces: the Quick Settings tile, the setup and settings screen, launcher shortcuts and `START`/`STOP` intents. |
+| [`HandsFreeTileService`](../app/src/main/java/com/handsfreegpt/HandsFreeTileService.kt), [`MainActivity`](../app/src/main/java/com/handsfreegpt/MainActivity.kt) | Quick Settings tile, setup and settings screen, launcher shortcuts, `START`/`STOP` intents, and play-from-search. |
 | [`Prefs`](../app/src/main/java/com/handsfreegpt/Prefs.kt) | Settings backed by SharedPreferences, exposed through property delegates. |
 
 ```mermaid
 flowchart LR
     you((You)) -- speech --> mic[[Microphone]]
     mic --> chatgpt["ChatGPT app<br/>(dictation)"]
-    mic --> detector["SpeechEndDetector<br/>+ SpeechTracker"]
-    detector -- "you stopped talking" --> controller[DictationController]
-    controller -- "press mic / ■ / ↑ / X" --> service[HandsFreeService]
+    mic --> detector["SpeechEndDetector"]
+    detector -- loudness --> tracker["SpeechTracker<br/>(silence)"]
+    detector -- "PCM through a pipe" --> asr["On-device recogniser<br/>+ CommandMatcher"]
+    buttons["MediaControls<br/>wheel · headset · Android Auto"] --> controller
+    tracker --> controller[DictationController]
+    asr -- "SEND / STOP / CANCEL" --> controller
+    controller -- "press mic / ■ / ↑ / X<br/>set the text" --> service[HandsFreeService]
     service -- "reads and taps" --> chatgpt
     controller --> pill[Status pill]
-    tile[Tile · shortcuts · app] --> controller
 ```
 
 ## The dictation loop
 
 Each tick reads a fresh `Snapshot` of ChatGPT's screen and decides what to do next. Because of that, the
-controller copes with missed events, with you tapping things yourself, and with ChatGPT acting on its own,
-for example sending a dictation by itself.
+controller copes with missed events, with you tapping things yourself, and with ChatGPT acting on its own.
 
 ```mermaid
 stateDiagram-v2
@@ -41,13 +51,14 @@ stateDiagram-v2
     WAIT_IDLE --> LISTENING: already dictating
     STARTING --> LISTENING: dictation bar appears
     STARTING --> WAIT_IDLE: no bar after 3.5 s (2 retries)
-    LISTENING --> STOPPING: you stopped talking, press ■ or ↑
-    LISTENING --> READY: nothing said, press X
+    LISTENING --> STOPPING: send it, next button, or silence, press ■ or ↑
+    LISTENING --> READY: cancel that, previous button, or nothing said, press X
+    STOPPING --> FINISHING: a command to remove or a send pending
     STOPPING --> READY: dictation bar gone
-    STOPPING --> WAIT_REPLY: auto-send or continuous mode
-    WAIT_REPLY --> WAIT_IDLE: reply finished (continuous)
-    WAIT_REPLY --> READY: message sent
-    READY --> WAIT_IDLE: tap the pill
+    FINISHING --> READY: command removed, message sent
+    FINISHING --> WAIT_REPLY: sent (continuous mode)
+    WAIT_REPLY --> WAIT_IDLE: reply finished
+    READY --> WAIT_IDLE: tap the pill or press play
     READY --> [*]: hold the pill, tile, or Stop
 ```
 
@@ -59,88 +70,129 @@ the pill, and goes back to `READY`.
 - **Only the lower 60% of the window** is searched. The composer lives there, even with the keyboard up, so a
   word like "stop" or "send" inside a chat message is never mistaken for a button.
 - **Every label gets one role**, checked in priority order: cancel → stop → send → voice mode → mic. That way
-  "Stop dictation" can never be read as the mic. If two buttons match the same role, the lowest one wins.
+  "Stop dictation" can never be read as the mic.
 - **State comes from which buttons are present:**
   - *dictating*: a stop button and no mic, or the X is present.
   - *generating*: a stop button next to the mic.
   - *idle*: a mic and no stop button.
+- **The composer's text box** is the lowest editable node. A placeholder isn't treated as text: empty fields
+  report their hint as text, so `isShowingHintText` is checked.
 - **Position fallback for unknown labels.** The mic is the button just left of the voice-mode button. ■ and ↑
   are the last two buttons in the same row as a recognised X. The fallback must be anchored on the X, because a
   composer holding text (`[+] … [mic] [send]`) has exactly the same shape as the dictation bar
-  (`[X] … [■] [↑]`). Scenario 3 of the end-to-end test guards against mixing them up.
+  (`[X] … [■] [↑]`). End-to-end scenario 3 guards this.
 - **It waits for the UI to settle.** The mic is only pressed once its bounds are the same on two consecutive
-  ticks, because ChatGPT may still be animating in.
-- **Clicking** uses `ACTION_CLICK` on the node, or on a clickable ancestor at most 4× its size so a whole
-  container is never clicked. Otherwise it sends a real tap through `dispatchGesture`.
-- **Diagnostics:** a capture is a text dump of ChatGPT's accessibility tree, with labels, bounds and flags.
-  Long chat text is redacted. It's what you need to adapt the matching after a ChatGPT update.
+  ticks.
+- **Clicking** uses `ACTION_CLICK` on the node, or on a clickable ancestor at most 4× its size. Otherwise it
+  sends a real tap through `dispatchGesture`.
 
-## Knowing when you've stopped talking
-
-### Sharing the microphone
+## Sharing the microphone
 
 ChatGPT is recording while it dictates, so HandsFree GPT has to listen at the same time. Android 10+ supports
 this: its [concurrent-capture policy](https://developer.android.com/media/platform/sharing-audio-input) lets an
 enabled accessibility service capture alongside the app in the foreground.
 
-HandsFree GPT records with the `VOICE_RECOGNITION` source, the one the policy is most lenient with for
-accessibility services, at 16 kHz mono, and only computes loudness. If the platform silences it anyway, the app
-notices: `AudioRecordingConfiguration.isClientSilenced()` reports it, or the samples come back as pure digital
-zeros. In that case it falls back to a fixed timer, and you can still tap the pill to stop.
+HandsFree GPT records with the `VOICE_RECOGNITION` source at 16 kHz mono. If the platform silences it anyway,
+the app notices: `isClientSilenced()` reports it, or the samples come back as pure digital zeros. In that case
+it falls back to a timer, and the buttons and the pill still work.
 
 On an Android 16 emulator, the mock ChatGPT's own recording reported `isClientSilenced=false` the whole time
 HandsFree GPT was listening alongside it.
 
-### `SpeechTracker`
+## Finishing a dictation
 
-| Step | Rule |
-|---|---|
-| Frames | 20 ms of PCM is converted to loudness in dBFS. |
-| Noise floor | Starts as the quietest frame of the first 300 ms. It then **falls fast** (α = 0.15) during pauses and **rises slowly** (α = 0.03). Steady road noise becomes background, and speech that began before listening started is still caught at the first pause. |
-| Speech frame | Louder than the floor by the sensitivity setting (default 10 dB) and above −58 dBFS. While you're talking, the threshold drops 3 dB (hysteresis). |
-| Started talking | At least 200 ms of speech in one burst, so clicks and bumps don't count. |
-| Finished | `silenceMs` of silence after speech (default 1.6 s). Also ends if nothing is said for 12 s (the dictation is cancelled) or after 90 s. |
+### Voice commands
 
-[`SpeechTrackerTest`](../app/src/test/java/com/handsfreegpt/SpeechTrackerTest.kt) feeds it synthetic loudness
-traces:
-- a quiet room
-- road noise only 14 dB below speech
-- talking before the floor is known
-- a 1.2 s pause mid-sentence
-- background noise that gets 8 dB louder
-- silence
-- non-stop talking
+- **The recogniser.** [`VoiceCommandRecognizer`](../app/src/main/java/com/handsfreegpt/VoiceCommandRecognizer.kt)
+  hands the shared audio to Android's own `SpeechRecognizer` through a `ParcelFileDescriptor` pipe
+  (`EXTRA_AUDIO_SOURCE`, Android 13).
+  - **No extra capture.** It never opens a second microphone stream.
+  - **Never blocks capture.** A bounded queue and a writer thread drop audio rather than stall the capture loop.
+  - **On-device only.** It uses `createOnDeviceSpeechRecognizer` exclusively. When that's unavailable, voice
+    commands are switched off rather than falling back to a cloud recogniser.
+- **Continuous recognition.** It asks for a *segmented session* (`EXTRA_SEGMENTED_SESSION`) with partial
+  results. Recognisers that ignore segmented mode are simply restarted after each utterance.
+- **Status in settings.** The settings screen shows whether the phone's language is installed for offline
+  recognition (`checkRecognitionSupport`) and can trigger the download (`triggerModelDownload`). The
+  **Test voice commands** dialog shows what the recogniser hears.
+- **Matching** ([`CommandMatcher`](../app/src/main/java/com/handsfreegpt/VoiceCommands.kt)):
+  - **Normalising.** Transcripts are lowercased and punctuation is dropped.
+  - **Only at the very end.** A command matches only when the transcript *ends* with the phrase, on a word
+    boundary.
+  - **Firing.** A partial result arms the command. It fires after 0.7 s with no further words, or immediately
+    when the recogniser closes the segment. More words disarm it, so "…send it to my boss" never fires.
+  - **Specificity.** The longest phrase wins, and a command fires once per dictation.
+- **Removing the command.** ChatGPT transcribes the command too, so a voice command presses **■, not ↑**.
+  `FINISHING` waits for the transcript to land in the text box, then:
+  - **Strip.** `stripTrailingCommand` turns "What's the forecast? Send it." into "What's the forecast?".
+  - **Set the text** with `ACTION_SET_TEXT`.
+  - **Send or keep.** For "send it" it presses send; for "stop dictation" it leaves the text for editing.
+- **Racing silence detection.** If silence detection fires first, the controller waits 1.2 s, so a command
+  still being recognised can win. Silence auto-stop can also be switched off for noisy cars.
+
+### Car and headset buttons
+
+- **Claiming the buttons.** Android routes media buttons to the app that is **playing audio**. While hands-free
+  is on, [`MediaControls`](../app/src/main/java/com/handsfreegpt/MediaControls.kt) loops a silent `AudioTrack`
+  and holds transient audio focus. That also pauses music, which keeps it out of the dictation. Its
+  `MediaSession` maps:
+
+  | Button | Action |
+  |---|---|
+  | Play/Pause, headset button | `toggleListening` |
+  | Next | `sendNow` |
+  | Previous | `cancelNow` |
+  | Stop | `endSession` |
+- **Status on the car display.** The status text is published as the track title, so Bluetooth car displays
+  show "Listening…".
+- **Android Auto** gives the wheel buttons to the media app on its screen, so
+  [`HandsFreeMediaBrowser`](../app/src/main/java/com/handsfreegpt/HandsFreeMediaBrowser.kt) lists the app as a
+  media source.
+  - **What you see.** One playable item, plus Send and Cancel as custom actions on the now-playing screen.
+  - **Starting.** Play starts hands-free, as does "Hey Google, play HandsFree GPT" via play-from-search.
+  - **No resume controls.** System UI's "resume playback" connection is refused, because there's nothing to
+    resume.
 
 ### Knowing when a reply has finished (continuous mode)
 
 While a reply streams, ChatGPT shows a stop button next to the mic (*generating*). The controller waits until
 the composer is idle again **and** the window content hasn't changed for 1.5 s, because streaming text changes
-it constantly. Then it starts the next dictation. The service only subscribes to content-change events while a
-session is running.
+it constantly. Then it starts the next dictation.
 
 ## Testing
 
 | Layer | Covers | How |
 |---|---|---|
-| Unit | `SpeechTracker` | JUnit with synthetic loudness traces (7 scenarios). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (16 checks). |
-| Static | Android Lint | `./gradlew lint`, with zero issues in `:app`. |
+| Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (22 checks). |
+| Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
-`mock-chatgpt` is a test double that reuses ChatGPT's package name. It reproduces the composer and dictation bar
-with real content descriptions, holds the microphone while "dictating", and streams a fake reply. Its
-*odd labels* mode renames or removes labels to exercise the position fallback.
+- **Media buttons** are tested with `adb shell input keyevent KEYCODE_MEDIA_*`.
+- **Voice commands** are tested end to end with real recognition:
+  - **Debug-only replay.** A receiver in `app/src/debug` queues a recording (`send-it.pcm`, made with Windows
+    speech synthesis), which the next dictation plays instead of the microphone.
+  - **Real recogniser.** Android System Intelligence on the emulator recognises the clip.
+  - **The check.** The mock must receive "Hello from dictation." with "Send it" removed.
+
+`mock-chatgpt` is a test double that reuses ChatGPT's package name:
+- It reproduces the composer and dictation bar, with real content descriptions.
+- It holds the microphone while "dictating", inserts a transcript that includes the spoken command, and streams
+  a fake reply.
+- Its *odd labels* mode renames or removes labels to exercise the position fallback.
 
 ## Design choices
 
 - **No dependencies, platform Views.** The APK is small, there's nothing to keep updated and builds are fast.
-  The only UI is a settings screen.
+  `androidx.annotation` is used `compileOnly`, purely so lint can enforce `@RequiresApi(33)` at every call site.
 - **Polling plus events.** A 250 ms tick re-reads the tree from scratch, so a missed event can't wedge the loop.
   When no session is active, the service only listens for window-state events.
-- **One thread for logic.** Everything runs on the main thread except the audio loop. Its results are tagged
-  with a generation counter, so a detector that has already been stopped can't deliver a late result.
+- **One thread for logic.** Everything runs on the main thread except the audio loop and the pipe writer.
+  Audio results carry a generation counter, so a stopped detector can't deliver a late result.
+- **Swappable recogniser.** Voice commands sit behind `CommandRecognizer`, so a bundled offline recogniser could
+  replace the platform one on phones without on-device recognition.
 - **Privacy by construction.**
-  - There is no `INTERNET` permission.
+  - There is no `INTERNET` permission, and recognition is on-device only.
   - Audio never leaves memory.
   - Captures redact chat text.
   - Backups include only the settings.

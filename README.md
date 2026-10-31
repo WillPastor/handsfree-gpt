@@ -5,7 +5,7 @@
 <h1 align="center">HandsFree GPT</h1>
 
 <p align="center">
-  Hands-free dictation for the ChatGPT Android app: start talking, pause, and it sends.<br>
+  Hands-free dictation for the ChatGPT Android app: talk, then say "send it" or press the steering-wheel button.<br>
   No voice mode, so you keep the full text models.
 </p>
 
@@ -24,57 +24,83 @@ ChatGPT's voice mode is convenient, but it runs on a separate, voice-tuned model
 the regular models, with full reasoning and long answers. The catch is that it needs a tap to start and another
 to stop, which doesn't work when your hands are on the steering wheel.
 
-**HandsFree GPT does the tapping.** It starts ChatGPT's dictation and listens for the moment you stop talking.
-Then it stops the dictation (■) or sends it (↑). Optionally, it waits for the reply and listens again.
+**HandsFree GPT does the tapping.** It starts ChatGPT's dictation, then finishes it in whichever of these
+happens first:
 
-> **Status: MVP (v0.1.0).** Tested end to end on an emulator against a mock ChatGPT. It hasn't yet been
-> validated against the live ChatGPT app. See [Limitations](#limitations).
+- **You say a command at the end**, such as "…what's the forecast for tomorrow, *send it*". It's recognised
+  offline on the phone, works over road noise, music or passengers, and is removed from your message.
+- **You press a steering-wheel or headset button**: ⏭ sends, ⏮ cancels. It also works from Android Auto's
+  media screen.
+- **You stop talking** (optional silence detection).
+
+> **Status: v0.2.0.** Tested end to end on an emulator against a mock ChatGPT, including real on-device speech
+> recognition of a spoken "send it". It hasn't yet been validated against the live ChatGPT app.
+> See [Limitations](#limitations).
 
 ## Demo
 
 <table>
   <tr>
     <td align="center"><img src="docs/images/demo.gif" width="200" alt="Demo: start, listen, send, wait for the reply, listen again"><br><sub>Continuous mode loop</sub></td>
-    <td align="center"><img src="docs/images/2-listening.png" width="200" alt="Status pill while listening"><br><sub>Listening</sub></td>
-    <td align="center"><img src="docs/images/1-setup.png" width="200" alt="Setup checklist"><br><sub>Setup</sub></td>
+    <td align="center"><img src="docs/images/4-voice-words.png" width="200" alt="Status pill showing the words heard so far"><br><sub>Live words, before "send it"</sub></td>
+    <td align="center"><img src="docs/images/5-voice-settings.png" width="200" alt="Voice command and car button settings"><br><sub>Voice &amp; car settings</sub></td>
     <td align="center"><img src="docs/images/3-settings-dark.png" width="200" alt="Settings in dark mode"><br><sub>Settings (dark)</sub></td>
   </tr>
 </table>
 
 <sub>Recorded on an Android 16 emulator against <a href="mock-chatgpt">the mock ChatGPT</a> used by the end-to-end
-tests. The emulator has no voice input, so a tap on the pill stands in for "you stopped talking".</sub>
+tests. The live words come from Android's on-device recogniser hearing a synthesised recording.</sub>
 
 ## Features
 
-- **One-tap start** from the app, a Quick Settings tile, a launcher shortcut, or any routine app (via an intent).
-  ChatGPT opens, you hear a beep, and dictation starts.
-- **Stops when you stop talking.** It detects silence against an adaptive noise floor tuned for road noise.
+- **Voice commands.** At the end of a dictation you can say:
+  - "send it" or "send message" to send
+  - "stop dictation" to keep the text so you can edit it
+  - "cancel that" to discard it
+
+  A command only counts as the last thing said, so "…send it to my boss" doesn't trigger it. Commands are
+  removed from the message before it's sent, and the phrases are editable.
+- **Steering-wheel, headset and Android Auto buttons.** Play/pause toggles talking and finishing, next sends,
+  previous cancels. In Android Auto, HandsFree GPT is a media source with Talk, Send and Cancel buttons.
+- **One-tap start** from the app, a Quick Settings tile, a launcher shortcut, "Hey Google, play HandsFree GPT",
+  or any routine app via an intent.
 - **Auto-send** and an experimental **continuous conversation** mode that sends, waits for the reply, then
   listens again.
-- **Floating status pill.** Tap to talk or stop early, hold to exit, drag to move it. It keeps the screen on.
-- **Robust button finding.** Buttons are matched by accessibility label first and by position as a fallback.
-  When something isn't found, it saves a capture of ChatGPT's layout so the matching can be fixed.
-- **Private by design.** There's no internet permission and audio never leaves memory.
-  See [Privacy](#privacy).
+- **Floating status pill** that shows the words as they're heard. Tap it to talk or stop, hold it to exit,
+  drag to move it. It keeps the screen on.
+- **Robust button finding.** Buttons are matched by accessibility label, with button position as a fallback.
+  If a button can't be found, the app saves a capture of ChatGPT's layout so the matching can be fixed.
+- **Private by design.** No internet permission, and recognition happens on the device. See [Privacy](#privacy).
 
 ## How it works
 
 An Android **accessibility service** reads ChatGPT's screen and presses its buttons. The key trick is that
-**Android 10+ lets an accessibility service record audio at the same time as the app on screen**. ChatGPT keeps
-transcribing while HandsFree GPT measures loudness to tell when you've finished.
+**Android 10+ lets an accessibility service record audio at the same time as the app on screen**. While
+ChatGPT transcribes, HandsFree GPT taps the same audio for two things:
+- an energy-based silence detector
+- Android's own **on-device speech recogniser**, fed through a pipe, which spots spoken commands
+
+A media session turns car and headset buttons into the same actions.
 
 ```mermaid
 flowchart LR
     you((You)) -- speech --> mic[[Microphone]]
     mic --> chatgpt["ChatGPT<br/>(dictation)"]
-    mic --> vad["Silence detection"]
-    vad -- "you stopped talking" --> ctrl[State machine]
-    ctrl -- "press mic / ■ / ↑" --> a11y[Accessibility service]
+    mic --> tap["Shared audio"]
+    tap --> vad["Silence detection"]
+    tap --> asr["On-device recogniser<br/>&quot;…send it&quot;"]
+    buttons["Steering wheel · headset<br/>Android Auto"] --> ctrl
+    vad --> ctrl[State machine]
+    asr --> ctrl
+    ctrl -- "press mic / ■ / ↑ / X<br/>remove the command" --> a11y[Accessibility service]
     a11y -- "reads and taps" --> chatgpt
 ```
 
-The state machine, button-finding rules, voice activity detection and mic sharing are covered in
-**[docs/architecture.md](docs/architecture.md)**.
+**[docs/architecture.md](docs/architecture.md)** covers:
+- the state machine
+- how the command matcher and "strip the command" step work
+- media-button routing
+- mic sharing
 
 ## Install
 
@@ -84,22 +110,32 @@ The state machine, button-finding rules, voice activity detection and mic sharin
 3. Tap **Accessibility settings** and turn on **HandsFree GPT**.
    > Android 13+ blocks accessibility services in sideloaded apps with a "Restricted setting" message. To allow
    > it: **App info** → ⋮ → **Allow restricted settings**, then turn the service on.
-4. Optional: add the **Hands-free GPT** tile to Quick Settings.
+4. **Voice commands:** the settings screen shows whether offline speech recognition is ready. Use
+   **Test voice commands** to check.
+5. **Android Auto (optional):** Android Auto settings → tap **Version** 10 times → ⋮ → **Developer settings** →
+   **Unknown sources**. HandsFree GPT then appears among the media apps.
+6. Optional: add the **Hands-free GPT** tile to Quick Settings.
 
 Requires Android 10+ and the [ChatGPT app](https://play.google.com/store/apps/details?id=com.openai.chatgpt).
+Voice commands need Android 13+.
 
 ## Use
 
-| To… | Do this |
-|---|---|
-| Start | **▶ Start hands-free**, the Quick Settings tile, or long-press the app icon → *Start hands-free* |
-| Finish early | Tap the pill |
-| Talk again | Tap the pill |
-| Turn it off | Hold the pill, tap the tile, or press **■ Stop** |
-| Automate | Launch `com.handsfreegpt.MainActivity` with action `com.handsfreegpt.action.START` or `…STOP` |
+| To… | Say | Press | Or |
+|---|---|---|---|
+| Start talking | | Play/Pause | ▶ in the app, the tile, or tap the pill |
+| Send | "…send it" | Next ⏭ | Stop talking (with auto-send on) |
+| Stop and keep the text | "…stop dictation" | Play/Pause | Stop talking, or tap the pill |
+| Cancel | "…cancel that" | Previous ⏮ | Say nothing for 12 s |
+| Turn hands-free off | | Stop | Hold the pill, or tap the tile |
 
-The settings cover the silence length, speech sensitivity, timeouts, auto-send, continuous mode, starting
-whenever ChatGPT opens, beeps, and the words used to recognise ChatGPT's buttons.
+The settings cover:
+- the voice-command phrases
+- the silence length and sensitivity, or turning silence detection off for noisy cars
+- timeouts, auto-send and continuous mode
+- starting whenever ChatGPT opens
+- beeps
+- the words used to recognise ChatGPT's buttons
 
 ## Build and test
 
@@ -108,41 +144,47 @@ Needs JDK 17+ (Android Studio's bundled JDK works) and the Android SDK, platform
 ```bash
 ./gradlew assembleDebug              # → app/build/outputs/apk/debug/app-debug.apk
 ./gradlew lint testDebugUnitTest     # Android Lint + unit tests
-scripts/e2e.sh                       # end-to-end, on a running emulator (~90 s)
+scripts/e2e.sh                       # end-to-end, on a running emulator (~2 min)
 ```
 
 | Layer | What it checks |
 |---|---|
-| **Unit** ([`SpeechTrackerTest`](app/src/test/java/com/handsfreegpt/SpeechTrackerTest.kt)) | Silence detection on synthetic audio: quiet rooms, road noise, mid-sentence pauses, rising background noise, timeouts |
-| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh)) | 16 checks on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double with ChatGPT's composer and dictation bar that holds the mic like the real app. It covers start, auto-cancel, tap-to-stop, the position fallback, long-press exit, the tile, and that ChatGPT keeps its mic while both apps listen |
+| **Unit** (17 tests) | [`SpeechTrackerTest`](app/src/test/java/com/handsfreegpt/SpeechTrackerTest.kt) runs silence detection on synthetic audio: road noise, pauses, rising noise, timeouts. [`VoiceCommandsTest`](app/src/test/java/com/handsfreegpt/VoiceCommandsTest.kt) checks that commands fire only at the end and how the command is stripped from the text |
+| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh), 22 checks) | Runs on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double that holds the mic like the real app. Covers: start, auto-cancel, tap to stop, the position fallback, long-press exit, the tile, **media buttons**, and a **spoken "…send it"** replayed into Android's on-device recogniser, which must send the message without the command |
 | **CI** ([GitHub Actions](.github/workflows/ci.yml)) | Lint, unit tests and both APKs on every push |
 
 ## Project structure
 
 ```
-app/                      the app
+app/                       the app
   src/main/java/com/handsfreegpt/
-    HandsFreeService.kt     accessibility service: reads/taps ChatGPT, hosts the overlay
-    DictationController.kt  the hands-free state machine
-    ChatGptUi.kt            accessibility tree → Snapshot (buttons + state), clicks, captures
-    SpeechEndDetector.kt    shared-mic capture → loudness
-    SpeechTracker.kt        speech / silence decisions (pure Kotlin)
-    StatusOverlay.kt        floating status pill
-    HandsFreeTileService.kt Quick Settings tile
-    MainActivity.kt         setup & settings screen, START/STOP intents
-    Prefs.kt                settings
-  src/test/…                unit tests
-mock-chatgpt/             test double for end-to-end tests (never ship it)
-scripts/e2e.sh            end-to-end test runner
-docs/                     architecture notes and images
+    HandsFreeService.kt      accessibility service: reads/taps ChatGPT, hosts the overlay
+    DictationController.kt   the hands-free state machine
+    ChatGptUi.kt             accessibility tree → Snapshot (buttons, text box, state), clicks, captures
+    SpeechEndDetector.kt     shared-mic capture → silence detection + audio for the recogniser
+    SpeechTracker.kt         speech / silence decisions (pure Kotlin)
+    VoiceCommands.kt         command matcher + removing the command from the text (pure Kotlin)
+    VoiceCommandRecognizer.kt  Android's on-device recogniser, fed through a pipe
+    MediaControls.kt         media session: steering-wheel / headset / Android Auto buttons
+    HandsFreeMediaBrowser.kt Android Auto media source
+    StatusOverlay.kt         floating status pill
+    HandsFreeTileService.kt  Quick Settings tile
+    MainActivity.kt          setup & settings screen, START/STOP intents
+    Prefs.kt                 settings
+  src/debug/                 test-only: replay a recording into voice commands
+  src/test/…                 unit tests
+mock-chatgpt/              test double for end-to-end tests (never ship it)
+scripts/e2e.sh             end-to-end test runner
+docs/                      architecture notes and images
 ```
 
 ## Roadmap
 
-- [ ] Verify button labels against the live ChatGPT app, using a capture from a real device
+- [ ] Verify button labels and voice commands against the live ChatGPT app, using a capture from a real device
 - [ ] Read replies aloud, then listen again, for a complete in-car loop
-- [ ] **Android Auto controller**: big Talk / Stop / Send / Cancel buttons on the car screen (Car App Library)
-- [ ] Steering-wheel media buttons for talk and stop
+- [x] ~~Android Auto controller~~: shipped in v0.2.0 as a media source with Talk / Send / Cancel
+- [x] ~~Steering-wheel media buttons~~: shipped in v0.2.0
+- [ ] A wake phrase to *start* talking without a button
 - [ ] Localised UI strings
 
 ## Limitations
@@ -151,13 +193,18 @@ docs/                     architecture notes and images
   visible buttons. The pill keeps the screen on while hands-free is active.
 - It depends on ChatGPT's UI. An app update can rename or move buttons. Captures and editable button words
   make that a quick fix rather than a code change.
+- Voice commands need **Android 13+** and Android's offline speech recognition for your language. The app
+  shows whether it's ready and can trigger the download.
+- **Your music pauses while hands-free is on.** That's how the car's buttons reach the app, and it keeps the
+  music out of your dictation.
 - If Android won't share the microphone, as happens with some privacy-sensitive recordings, the app falls back
-  to a timer. You can still tap the pill to stop.
+  to a timer. You can still use the buttons or tap the pill.
 
 ## Privacy
 
 - No `INTERNET` permission, so the app can't send anything anywhere.
-- Audio is analysed 20 ms at a time in memory and immediately discarded. Nothing is recorded or stored.
+- Audio is analysed 20 ms at a time in memory and never recorded or stored.
+- Voice commands use Android's **on-device** recogniser only; the app never falls back to a cloud service.
 - The accessibility service only acts on the ChatGPT app. It subscribes to content changes only while
   hands-free is on.
 - UI captures leave out chat text, stay in app-private storage, and are shared only if you tap **Share**.
