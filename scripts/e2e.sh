@@ -63,13 +63,23 @@ step "Build and install the app and the mock ChatGPT"
 adb_ uninstall com.handsfreegpt >/dev/null 2>&1 || true # start from default settings
 adb_ install -r -g "$ROOT/app/build/outputs/apk/debug/app-debug.apk" >/dev/null
 adb_ install -r -g "$ROOT/mock-chatgpt/build/outputs/apk/debug/mock-chatgpt-debug.apk" >/dev/null
-enabled="$(shell settings get secure enabled_accessibility_services)"
-if [[ "$enabled" != *"$SERVICE"* ]]; then
-  if [[ -z "$enabled" || "$enabled" == "null" ]]; then enabled="$SERVICE"; else enabled="$enabled:$SERVICE"; fi
-  shell settings put secure enabled_accessibility_services "$enabled"
+# Enable the accessibility service, keeping any others. Android drops a reinstalled app's service from the
+# list asynchronously, which can undo our first attempt, so retry until it is actually bound.
+bound=false
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if shell dumpsys accessibility | grep -q 'label=HandsFree GPT'; then bound=true; break; fi
+  enabled="$(shell settings get secure enabled_accessibility_services)"
+  if [[ "$enabled" != *"$SERVICE"* ]]; then
+    if [[ -z "$enabled" || "$enabled" == "null" ]]; then enabled="$SERVICE"; else enabled="$enabled:$SERVICE"; fi
+    shell settings put secure enabled_accessibility_services "$enabled"
+  fi
+  shell settings put secure accessibility_enabled 1
+  sleep 2
+done
+if [[ $bound != true ]]; then
+  echo "Couldn't enable the HandsFree GPT accessibility service." >&2
+  exit 1
 fi
-shell settings put secure accessibility_enabled 1
-sleep 3
 adb_ logcat -b crash -c
 
 step "1. Start: presses the dictation mic, hears nothing, cancels"
