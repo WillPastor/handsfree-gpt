@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "HandsFreeGPT"
 include(":app")
+include(":mock-chatgpt") // test double for end-to-end tests (scripts/e2e.sh)
