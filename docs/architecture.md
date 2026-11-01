@@ -56,8 +56,11 @@ stateDiagram-v2
     STOPPING --> FINISHING: a command to remove or a send pending
     STOPPING --> READY: dictation bar gone
     FINISHING --> READY: command removed, message sent
-    FINISHING --> WAIT_REPLY: sent (continuous mode)
-    WAIT_REPLY --> WAIT_IDLE: reply finished
+    FINISHING --> WAIT_REPLY: sent (continuous or read aloud)
+    WAIT_REPLY --> WAIT_IDLE: reply finished (continuous)
+    WAIT_REPLY --> READING: reply finished (read aloud), press Read aloud
+    READING --> WAIT_IDLE: done speaking (continuous), or next button
+    READING --> READY: done speaking, or tap the pill
     READY --> WAIT_IDLE: tap the pill or press play
     READY --> [*]: hold the pill, tile, or Stop
 ```
@@ -160,18 +163,37 @@ HandsFree GPT was listening alongside it.
   - **No resume controls.** System UI's "resume playback" connection is refused, because there's nothing to
     resume.
 
-### Knowing when a reply has finished (continuous mode)
+### Knowing when a reply has finished (continuous mode and read aloud)
 
 While a reply streams, ChatGPT shows a stop button next to the mic (*generating*). The controller waits until
 the composer is idle again **and** the window content hasn't changed for 1.5 s, because streaming text changes
-it constantly. Then it starts the next dictation.
+it constantly. Then it reads the reply aloud, starts the next dictation, or both.
+
+### Reading replies aloud
+
+`READING` presses ChatGPT's **own** Read aloud button, so the app never reads, copies or speaks the reply text
+itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
+- **Finding the button.** Replies can sit anywhere on screen, so this one search covers the whole window and
+  takes the lowest match: the latest reply. Labels are matched like every other button, and are editable.
+- **Knowing when it's speaking**, without the text, from two signals:
+  - ChatGPT's stop-reading control is showing. Any plain "stop" counts, because nothing else can be stopped
+    then.
+  - More audio is playing than when the button was pressed. Android won't say whose audio it is, so the app
+    counts players with `getActivePlaybackConfigurations()`. Anything already playing then, such as the app's
+    own silent track or navigation, doesn't count as ChatGPT.
+- **Done** once both have been quiet for 2 s, which rides out pauses between sentences. Then it listens again
+  (continuous mode) or pauses.
+- **Controls while it speaks.** Next ⏭ stops the reading and starts a dictation. Play/pause, ⏮ or the pill stop
+  it and pause.
+- **Failures.** If the button can't be found within 5 s, or the reading doesn't start within 8 s even after a
+  second press, the app saves a capture and says so in amber.
 
 ## Testing
 
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (29 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (36 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -189,9 +211,13 @@ it constantly. Then it starts the next dictation.
   a fake reply.
 - Transcribing takes it 2 s. As the real app appears to, it brings its text box back first, with the send arrow
   showing but disabled.
+- A finished reply gets a Read aloud button. It "speaks" for 6 s, as a real audio player playing silence, and
+  shows Stop reading meanwhile.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
   makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations
   transcribe to can be set too.
+- Debug builds have a receiver, restricted to adb, that switches settings, so scenarios can turn on continuous
+  mode and read aloud.
 
 ## Design choices
 

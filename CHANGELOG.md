@@ -5,6 +5,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Read replies aloud** ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)). When a reply finishes, the
+  app presses ChatGPT's own Read aloud button, then waits until ChatGPT stops speaking before listening again
+  (continuous mode) or pausing. Next ⏭ skips the rest and starts talking; play/pause or tapping the pill stops
+  it. The app never reads the reply text: it watches ChatGPT's button and whether audio is playing.
+- The mock ChatGPT has a Read aloud button that "speaks" for 6 s, and end-to-end tests cover reading, waiting
+  and skipping. A debug-only receiver lets the tests switch settings.
+
 ### Fixed
 
 - **A message that itself ended in "send it" lost those words.** After removing the spoken command, the 0.2.1
