@@ -2,8 +2,10 @@ package com.openai.chatgpt
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.os.Handler
@@ -28,6 +30,8 @@ import kotlin.math.sqrt
  * "MockGPT" tag so the script can assert on what HandsFree GPT pressed.
  * A dictation takes 2 s to transcribe. Like the real app appears to (issue #1), the text box comes back,
  * its send arrow showing but disabled, before the transcript is in it.
+ * A finished reply gets a Read aloud button: after a moment it "speaks" (a real player, playing
+ * silence) for 6 s, showing Stop reading meanwhile.
  * Launch flags, remembered across launches:
  *   --ez odd true          labels the automation doesn't know (tests the position fallback)
  *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
@@ -40,10 +44,14 @@ class MainActivity : Activity() {
     private lateinit var composer: LinearLayout
     private lateinit var bar: LinearLayout
     private lateinit var trailing: ImageButton
+    private lateinit var actions: LinearLayout
+    private lateinit var readAloud: ImageButton
     private var generating = false
     private var transcribing = false
     private var ignoreSend = false
     private var dictated = DEFAULT_TRANSCRIPT
+    private var speech: AudioTrack? = null
+    private val endReading = Runnable { stopReading("READ ALOUD DONE") }
     @Volatile private var recording = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,6 +87,12 @@ class MainActivity : Activity() {
             button(android.R.drawable.ic_media_pause, if (odd) null else "Stop dictation") { endDictation("stop") },
             button(android.R.drawable.ic_menu_send, "Send") { endDictation("send") },
         ).apply { visibility = View.GONE }
+        // Under the latest reply: [copy] [read aloud].
+        readAloud = button(android.R.drawable.ic_lock_silent_mode_off, "Read aloud") { onReadAloud() }
+        actions = row(
+            button(android.R.drawable.ic_menu_agenda, "Copy") { Log.i(TAG, "TAP copy") },
+            readAloud,
+        ).apply { visibility = View.GONE }
 
         val bottom = FrameLayout(this).apply {
             addView(composer)
@@ -88,6 +102,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
             addView(ScrollView(context).apply { addView(transcript) }, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(actions, LinearLayout.LayoutParams(-1, -2))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
         })
         updateTrailing()
@@ -127,6 +142,7 @@ class MainActivity : Activity() {
 
     private fun startDictation() {
         Log.i(TAG, "TAP mic -> dictation started")
+        actions.visibility = View.GONE // a new turn
         composer.visibility = View.GONE
         bar.visibility = View.VISIBLE
         recording = true
@@ -169,11 +185,58 @@ class MainActivity : Activity() {
                 if (words < 30) handler.postDelayed(this, 100) else {
                     generating = false
                     updateTrailing()
+                    actions.visibility = View.VISIBLE
                     Log.i(TAG, "REPLY DONE")
                 }
             }
         })
     }
+
+    /** Like the real app: fetches the speech for a moment, then reads the reply out for [READ_MS]. */
+    private fun onReadAloud() {
+        if (speech != null) return stopReading("TAP stop reading")
+        Log.i(TAG, "TAP read aloud")
+        handler.postDelayed({
+            speech = silentSpeech().apply { play() }
+            readAloud.contentDescription = "Stop reading"
+            Log.i(TAG, "READING ALOUD")
+            handler.postDelayed(endReading, READ_MS)
+        }, 800)
+    }
+
+    private fun stopReading(log: String) {
+        handler.removeCallbacks(endReading)
+        speech?.let {
+            runCatching { it.stop() }
+            it.release()
+        }
+        speech = null
+        readAloud.contentDescription = "Read aloud"
+        Log.i(TAG, log)
+    }
+
+    /** Stands in for the speech: silence, but from a real player, so Android reports audio playing. */
+    private fun silentSpeech() = AudioTrack.Builder()
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build(),
+        )
+        .setAudioFormat(
+            AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(8000)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .build(),
+        )
+        .setTransferMode(AudioTrack.MODE_STATIC)
+        .setBufferSizeInBytes(16000)
+        .build()
+        .apply {
+            write(ShortArray(8000), 0, 8000)
+            setLoopPoints(0, 8000, -1)
+        }
 
     @SuppressLint("MissingPermission")
     private fun record() {
@@ -200,5 +263,6 @@ class MainActivity : Activity() {
         const val TAG = "MockGPT"
         const val TRANSCRIBE_MS = 2000L
         const val DEFAULT_TRANSCRIPT = "Hello from dictation. Send it."
+        const val READ_MS = 6000L
     }
 }
