@@ -129,7 +129,8 @@ HandsFree GPT was listening alongside it.
     wasn't there when the mic was pressed, has stopped changing for a tick, and that ChatGPT's send arrow is
     enabled for. It gives up after 20 s.
   - **Strips.** `stripTrailingCommand` turns "What's the forecast? Send it." into "What's the forecast?".
-  - **Sets the text** with `ACTION_SET_TEXT`, and checks on the next tick that the edit took.
+  - **Sets the text** with `ACTION_SET_TEXT`. The text without the command is worked out once, and later ticks
+    only check that the edit took, so a message that itself ends in "send it" keeps it.
   - **Sends or keeps.** For "send it" it presses send; for "stop dictation" it leaves the text for editing.
   - **Checks it went.** "Sent" only shows once the text box empties or a reply starts. If neither happens within
     3 s it presses send once more, then shows "Couldn't send" in amber.
@@ -170,7 +171,7 @@ it constantly. Then it starts the next dictation.
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (27 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (29 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -179,7 +180,8 @@ it constantly. Then it starts the next dictation.
   - **Debug-only replay.** A receiver in `app/src/debug` queues a recording (`send-it.pcm`, made with Windows
     speech synthesis), which the next dictation plays instead of the microphone.
   - **Real recogniser.** Android System Intelligence on the emulator recognises the clip.
-  - **The check.** The mock must receive "Hello from dictation." with "Send it" removed.
+  - **The check.** The mock must receive "Hello from dictation." with "Send it" removed. A second scenario
+    sets the transcript to "Repeat the words send it. Send it." and expects only the last "Send it" removed.
 
 `mock-chatgpt` is a test double that reuses ChatGPT's package name:
 - It reproduces the composer and dictation bar, with real content descriptions.
@@ -188,7 +190,8 @@ it constantly. Then it starts the next dictation.
 - Transcribing takes it 2 s. As the real app appears to, it brings its text box back first, with the send arrow
   showing but disabled.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
-  makes the send arrow do nothing, to test that the app says so instead of "Sent".
+  makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations
+  transcribe to can be set too.
 
 ## Design choices
 
