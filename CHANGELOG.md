@@ -5,6 +5,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-01
+
+First release checked on a real phone: dictation and "send it" work with the live ChatGPT app (1.2026.300) on a
+Samsung Galaxy S26 Ultra running Android 16.
+
 ### Fixed
 
 - **"…send it" on a longer dictation left the message unsent**, with the command still in it, while the pill

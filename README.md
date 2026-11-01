@@ -33,8 +33,9 @@ happens first:
   media screen.
 - **You stop talking** (optional silence detection).
 
-> **Status: v0.2.0.** Tested end to end on an emulator against a mock ChatGPT, including real on-device speech
-> recognition of a spoken "send it". It hasn't yet been validated against the live ChatGPT app.
+> **Status: v0.2.1.** Dictation and the "send it" voice command work with the live ChatGPT app (1.2026.300) on a
+> Samsung Galaxy S26 Ultra running Android 16. The steering-wheel buttons and Android Auto haven't been tried in
+> a car yet. Every change is also tested end to end on an emulator against a mock ChatGPT.
 > See [Limitations](#limitations).
 
 ## Demo
@@ -180,7 +181,8 @@ docs/                      architecture notes and images
 
 ## Roadmap
 
-- [ ] Verify button labels and voice commands against the live ChatGPT app, using a capture from a real device
+- [x] ~~Verify against the live ChatGPT app~~: dictation and "send it" checked on a real phone for v0.2.1
+- [ ] Try the steering-wheel buttons and Android Auto in a car
 - [ ] Read replies aloud, then listen again, for a complete in-car loop
 - [x] ~~Android Auto controller~~: shipped in v0.2.0 as a media source with Talk / Send / Cancel
 - [x] ~~Steering-wheel media buttons~~: shipped in v0.2.0
