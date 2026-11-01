@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end test: drives HandsFree GPT against the mock ChatGPT (./mock-chatgpt) on an emulator
-# and checks in logcat what it pressed. Needs one running emulator; takes about two minutes.
+# and checks in logcat what it pressed. Needs one running emulator; takes about three minutes.
 #
 #   scripts/e2e.sh                      # build, install, run every scenario
 #   ADB=/path/to/adb scripts/e2e.sh     # if adb isn't on PATH
@@ -32,14 +32,17 @@ expect() { if grep -qE -- "$2" "$LOG"; then ok "$1"; else bad "$1 (no log line m
 expect_not() { if grep -qE -- "$2" "$LOG"; then bad "$1 (unexpected /$2/)"; else ok "$1"; fi; }
 check() { if "${@:2}"; then ok "$1"; else bad "$1"; fi; }
 count() { grep -cE -- "$1" "$LOG" || true; }
+line_of() { grep -nE -- "$1" "$LOG" | head -n1 | cut -d: -f1; }
+in_order() { local a b; a="$(line_of "$1")"; b="$(line_of "$2")"; [[ -n $a && -n $b && $a -lt $b ]]; }
 
 begin() { adb_ logcat -c; }
 collect() { adb_ logcat -d -s HandsFreeGPT:V MockGPT:V AndroidRuntime:E | tr -d '\r' >"$LOG"; }
 skip() { echo "  skip  $1"; skipped=$((skipped + 1)); }
 handsfree() { shell am start -a "com.handsfreegpt.action.$1" -n com.handsfreegpt/.MainActivity >/dev/null; }
-mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) button labels, then go home
+mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) button labels, then go home.
+  # A second argument of true makes its send arrow do nothing.
   shell am force-stop com.openai.chatgpt
-  shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" >/dev/null
+  shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" --ez ignore_send "${2:-false}" >/dev/null
   sleep 2
   shell input keyevent KEYCODE_HOME
   sleep 1
@@ -158,14 +161,32 @@ mock false
 begin
 adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
 handsfree START
-sleep 15
+sleep 18
 collect
 if grep -q 'voice commands unavailable' "$LOG"; then
   skip "this emulator has no on-device speech recognition ($(grep -o 'unavailable: .*' "$LOG" | head -n1))"
 else
   expect "hears the spoken command" 'voice command SEND'
   expect "presses stop so the command can be removed" 'MockGPT.*TAP stop'
+  check "waits for the transcript before removing the command (#1)" in_order 'MockGPT.*TRANSCRIPT READY' 'set composer text'
   expect "sends the message without \"Send it\"" 'SENT: Hello from dictation\.$'
+  check "says Sent only once ChatGPT has taken the message (#1)" in_order 'MockGPT.*SENT:' 'READY: .*Sent'
+fi
+handsfree STOP
+
+step "8. ChatGPT doesn't take the message: presses send once more, then says so rather than \"Sent\""
+mock false true
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+sleep 22
+collect
+if grep -q 'voice commands unavailable' "$LOG"; then
+  skip "this emulator has no on-device speech recognition"
+else
+  check "presses send, then once more" test "$(count 'MockGPT.*TAP send \(ignored\)')" -eq 2
+  expect "says it couldn't send" "Couldn't send"
+  expect_not "never claims it was sent" 'READY: .*Sent'
 fi
 handsfree STOP
 

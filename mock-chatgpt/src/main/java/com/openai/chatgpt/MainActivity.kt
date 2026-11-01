@@ -26,8 +26,11 @@ import kotlin.math.sqrt
  * a composer row [+] [input] [mic] [voice/send/stop] and a dictation bar [X] [waveform] [■] [↑].
  * It holds the microphone while "dictating", like the real app, and logs every tap under the
  * "MockGPT" tag so the script can assert on what HandsFree GPT pressed.
- * Launch once with `--ez odd true` to use labels the automation doesn't know (tests the
- * position fallback); the choice is remembered across launches.
+ * A dictation takes 2 s to transcribe. Like the real app appears to (issue #1), the text box comes back,
+ * its send arrow showing but disabled, before the transcript is in it.
+ * Launch flags, remembered across launches:
+ *   --ez odd true          labels the automation doesn't know (tests the position fallback)
+ *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
  */
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -37,13 +40,18 @@ class MainActivity : Activity() {
     private lateinit var bar: LinearLayout
     private lateinit var trailing: ImageButton
     private var generating = false
+    private var transcribing = false
+    private var ignoreSend = false
     @Volatile private var recording = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sp = getSharedPreferences("mock", MODE_PRIVATE)
-        if (intent.hasExtra("odd")) sp.edit().putBoolean("odd", intent.getBooleanExtra("odd", false)).apply()
+        for (flag in listOf("odd", "ignore_send")) {
+            if (intent.hasExtra(flag)) sp.edit().putBoolean(flag, intent.getBooleanExtra(flag, false)).apply()
+        }
         val odd = sp.getBoolean("odd", false)
+        ignoreSend = sp.getBoolean("ignore_send", false)
         transcript = TextView(this).apply { textSize = 14f; text = "Mock ChatGPT (odd labels=$odd)\n" }
         input = EditText(this).apply {
             hint = "Ask ChatGPT"
@@ -98,14 +106,16 @@ class MainActivity : Activity() {
     private fun updateTrailing() {
         trailing.contentDescription = when {
             generating -> "Stop generating"
-            input.text.isNotEmpty() -> "Send prompt"
+            transcribing || input.text.isNotEmpty() -> "Send prompt"
             else -> "Start a voice conversation"
         }
+        trailing.isEnabled = !transcribing
     }
 
     private fun onTrailing() {
         when {
             generating -> { Log.i(TAG, "TAP stop generating"); generating = false; updateTrailing() }
+            input.text.isNotEmpty() && ignoreSend -> Log.i(TAG, "TAP send (ignored)")
             input.text.isNotEmpty() -> send(input.text.toString())
             else -> Log.e(TAG, "TAP VOICE MODE (the automation must never do this)")
         }
@@ -124,11 +134,21 @@ class MainActivity : Activity() {
         recording = false
         bar.visibility = View.GONE
         composer.visibility = View.VISIBLE
-        when (how) {
-            // Like the real app, the transcript includes everything said, spoken commands too.
-            "stop" -> input.append("Hello from dictation. Send it.")
-            "send" -> send("hello from dictation")
-        }
+        if (how == "cancel") return
+        transcribing = true
+        updateTrailing()
+        handler.postDelayed({
+            transcribing = false
+            when (how) {
+                // Like the real app, the transcript includes everything said, spoken commands too.
+                "stop" -> {
+                    input.append("Hello from dictation. Send it.")
+                    Log.i(TAG, "TRANSCRIPT READY")
+                }
+                "send" -> send("hello from dictation")
+            }
+            updateTrailing()
+        }, TRANSCRIBE_MS)
     }
 
     private fun send(text: String) {
@@ -174,5 +194,6 @@ class MainActivity : Activity() {
 
     private companion object {
         const val TAG = "MockGPT"
+        const val TRANSCRIBE_MS = 2000L
     }
 }
