@@ -53,6 +53,11 @@ class Snapshot(
     }
 }
 
+/** ChatGPT's Read aloud button under the latest reply, and the control that stops it while it speaks. */
+class ReadAloud(val read: Btn?, val stop: Btn?) {
+    override fun toString() = "read=$read stop=$stop"
+}
+
 class ChatGptUi(private val service: AccessibilityService, private val prefs: Prefs) {
 
     /** Root of ChatGPT's window if it is on screen (also works while the keyboard is up). */
@@ -122,6 +127,29 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
         return Snapshot(mic, stop, send, cancel, voice, input, guessed)
     }
 
+    /**
+     * Finds the Read aloud button of the latest reply, and the control that stops the reading. Replies
+     * can sit anywhere on screen, so this looks at the whole window, lowest (latest) first. Any plain
+     * "stop" counts too: when a reply is being read, nothing else ChatGPT shows can be stopped.
+     */
+    fun readAloud(): ReadAloud? {
+        val root = root() ?: return null
+        val (buttons, _) = collect(root, minFraction = 0f)
+        val readW = Prefs.words(prefs.readAloudWords)
+        val stopW = Prefs.words(prefs.stopReadingWords)
+        fun isStop(l: String) = stopW.any { it in l } || l == "stop" || l.startsWith("stop ")
+        var read: Btn? = null
+        var stop: Btn? = null
+        for (b in buttons.sortedByDescending { it.rect.centerY() }) {
+            when {
+                b.label.isEmpty() -> Unit
+                isStop(b.label) -> if (stop == null) stop = b
+                readW.any { it in b.label } -> if (read == null) read = b
+            }
+        }
+        return ReadAloud(read, stop)
+    }
+
     /** What's typed in the composer ("" when it only shows its placeholder). */
     fun composerText(input: AccessibilityNodeInfo): String =
         if (input.isShowingHintText) "" else input.text?.toString().orEmpty()
@@ -139,12 +167,17 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
             .sortedBy { it.rect.centerX() }
     }
 
-    /** Button-like nodes in the composer area, plus the lowest text field (the composer's input). */
-    private fun collect(root: AccessibilityNodeInfo): Pair<List<Btn>, AccessibilityNodeInfo?> {
+    /**
+     * Button-like nodes below [minFraction] of the window, plus the lowest text field (the composer's
+     * input). By default only the lower part, where the composer lives (it rises to mid-screen when
+     * the keyboard is up), so words like "stop" or "send" in chat messages aren't buttons.
+     */
+    private fun collect(
+        root: AccessibilityNodeInfo,
+        minFraction: Float = 0.4f,
+    ): Pair<List<Btn>, AccessibilityNodeInfo?> {
         val win = Rect().also { root.getBoundsInScreen(it) }
-        // Only look at the lower part of the window, where the composer lives (it rises to mid-screen
-        // when the keyboard is up), so words like "stop" or "send" in chat messages aren't buttons.
-        val minY = win.top + win.height() * 0.4f
+        val minY = win.top + win.height() * minFraction
         val out = ArrayList<Btn>()
         var input: AccessibilityNodeInfo? = null
         var inputY = Int.MIN_VALUE
@@ -214,7 +247,8 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
         append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
         val version = runCatching { service.packageManager.getPackageInfo(PKG, 0).versionName }.getOrNull()
         append("ChatGPT ").append(version ?: "not found").append('\n')
-        append("Detected: ").append(snapshot() ?: "ChatGPT window not on screen").append("\n\n")
+        append("Detected: ").append(snapshot() ?: "ChatGPT window not on screen").append('\n')
+        append("Read aloud: ").append(readAloud() ?: "-").append("\n\n")
         var lines = 0
         for (w in service.windows) {
             val r = w.root
