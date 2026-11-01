@@ -181,13 +181,17 @@ docs/                      architecture notes and images
 
 ## Roadmap
 
+Each planned feature has its own [issue](../../issues) with the details.
+
+- [ ] Read replies aloud, then listen again, for a complete in-car loop ([#3](../../issues/3))
+- [ ] A wake phrase to *start* talking without a button ([#4](../../issues/4))
+- [ ] Translate the app ([#5](../../issues/5))
+- [ ] Prepare for a Google Play release ([#6](../../issues/6))
+- [ ] A new name without "GPT" ([#7](../../issues/7))
+- [ ] Try the steering-wheel buttons and Android Auto in a car ([#9](../../issues/9))
 - [x] ~~Verify against the live ChatGPT app~~: dictation and "send it" checked on a real phone for v0.2.1
-- [ ] Try the steering-wheel buttons and Android Auto in a car
-- [ ] Read replies aloud, then listen again, for a complete in-car loop
 - [x] ~~Android Auto controller~~: shipped in v0.2.0 as a media source with Talk / Send / Cancel
 - [x] ~~Steering-wheel media buttons~~: shipped in v0.2.0
-- [ ] A wake phrase to *start* talking without a button
-- [ ] Localised UI strings
 
 ## Limitations
 
