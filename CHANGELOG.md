@@ -5,6 +5,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A message that itself ended in "send it" lost those words.** After removing the spoken command, the 0.2.1
+  fix could remove the phrase a second time, so "Repeat the words send it. Send it." was sent as "Repeat the
+  words". The app now works out the text without the command once, and only checks that the edit took. Found by
+  an [automated Codex review of #2](https://github.com/WillPastor/handsfree-gpt/pull/2#discussion_r4436439782).
+
 ## [0.2.1] - 2026-11-01
 
 First release checked on a real phone: dictation and "send it" work with the live ChatGPT app (1.2026.300) on a

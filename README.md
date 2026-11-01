@@ -151,7 +151,7 @@ scripts/e2e.sh                       # end-to-end, on a running emulator (~2 min
 | Layer | What it checks |
 |---|---|
 | **Unit** (17 tests) | [`SpeechTrackerTest`](app/src/test/java/com/handsfreegpt/SpeechTrackerTest.kt) runs silence detection on synthetic audio: road noise, pauses, rising noise, timeouts. [`VoiceCommandsTest`](app/src/test/java/com/handsfreegpt/VoiceCommandsTest.kt) checks that commands fire only at the end and how the command is stripped from the text |
-| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh), 27 checks) | Runs on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double that holds the mic and takes time to transcribe, like the real app. Covers: start, auto-cancel, tap to stop, the position fallback, long-press exit, the tile, **media buttons**, a **spoken "…send it"** replayed into Android's on-device recogniser, which must send the message without the command, and a send that doesn't go through, which must not be reported as sent |
+| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh), 29 checks) | Runs on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double that holds the mic and takes time to transcribe, like the real app. Covers: start, auto-cancel, tap to stop, the position fallback, long-press exit, the tile, **media buttons**, a **spoken "…send it"** replayed into Android's on-device recogniser, which must send the message without the command (even when the message itself ends in "send it"), and a send that doesn't go through, which must not be reported as sent |
 | **CI** ([GitHub Actions](.github/workflows/ci.yml)) | Lint, unit tests and both APKs on every push |
 
 ## Project structure

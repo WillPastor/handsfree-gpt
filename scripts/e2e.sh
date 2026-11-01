@@ -40,9 +40,10 @@ collect() { adb_ logcat -d -s HandsFreeGPT:V MockGPT:V AndroidRuntime:E | tr -d 
 skip() { echo "  skip  $1"; skipped=$((skipped + 1)); }
 handsfree() { shell am start -a "com.handsfreegpt.action.$1" -n com.handsfreegpt/.MainActivity >/dev/null; }
 mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) button labels, then go home.
-  # A second argument of true makes its send arrow do nothing.
+  # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to.
   shell am force-stop com.openai.chatgpt
-  shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" --ez ignore_send "${2:-false}" >/dev/null
+  shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" --ez ignore_send "${2:-false}" \
+    --es transcript "'${3:-Hello from dictation. Send it.}'" >/dev/null
   sleep 2
   shell input keyevent KEYCODE_HOME
   sleep 1
@@ -187,6 +188,21 @@ else
   check "presses send, then once more" test "$(count 'MockGPT.*TAP send \(ignored\)')" -eq 2
   expect "says it couldn't send" "Couldn't send"
   expect_not "never claims it was sent" 'READY: .*Sent'
+fi
+handsfree STOP
+
+step "9. A message that itself ends in \"send it\": only the spoken command is removed"
+mock false false 'Repeat the words send it. Send it.'
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+sleep 18
+collect
+if grep -q 'voice commands unavailable' "$LOG"; then
+  skip "this emulator has no on-device speech recognition"
+else
+  expect "keeps the message's own \"send it\"" 'SENT: Repeat the words send it\.$'
+  expect_not "doesn't remove the command a second time" 'SENT: Repeat the words$'
 fi
 handsfree STOP
 

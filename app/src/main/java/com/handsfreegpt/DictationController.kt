@@ -56,6 +56,7 @@ class DictationController(
     private var pendingStrip: String? = null // spoken command to remove from the transcript first
     private var textBefore: String? = null // the text box when we pressed the mic; null once the transcript is in
     private var lastText: String? = null // the text box on the previous tick, to see the transcript settle
+    private var stripTarget: String? = null // the transcript without the spoken command, worked out once
     private var stripTries = 0
     private var sendTries = 0
     private var sentAt = 0L // when we last pressed send; it only counts once ChatGPT has taken the message
@@ -180,6 +181,7 @@ class DictationController(
         notDictatingTicks = 0
         lastMicRect = null
         lastText = null
+        stripTarget = null
         stripTries = 0
         sendTries = 0
         sentAt = 0
@@ -355,20 +357,22 @@ class DictationController(
         textBefore = null // the transcript is in; from here on, changes to the text are ours
 
         pendingStrip?.let { phrase ->
-            val cleaned = CommandMatcher.stripTrailingCommand(text, phrase)
-            if (cleaned != text && stripTries++ < 3) {
-                ui.setComposerText(input!!, cleaned)
-                if (cleaned.isBlank()) {
+            // Work out the text without the command once, then only check that the edit took (retrying
+            // that same edit). A message that itself ends in "send it" keeps it (Codex review of #2).
+            val target = stripTarget ?: CommandMatcher.stripTrailingCommand(text, phrase).also { stripTarget = it }
+            if (text != target && stripTries++ < 3) {
+                ui.setComposerText(input!!, target)
+                if (target.isBlank()) {
                     pendingSend = false
                     pendingStrip = null
                     go(State.READY)
                     show("🤐 Nothing to send · tap to talk", GREY)
                 } else {
-                    lastText = cleaned // carry on next tick, once the edit shows up
+                    lastText = target // carry on next tick, once the edit shows up
                 }
                 return
             }
-            if (cleaned != text) Log.w(TAG, "couldn't remove \"$phrase\" from the text; leaving it in")
+            if (text != target) Log.w(TAG, "couldn't remove \"$phrase\" from the text; leaving it in")
             pendingStrip = null
         }
         if (!pendingSend) {

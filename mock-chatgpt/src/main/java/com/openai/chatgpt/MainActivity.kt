@@ -31,6 +31,7 @@ import kotlin.math.sqrt
  * Launch flags, remembered across launches:
  *   --ez odd true          labels the automation doesn't know (tests the position fallback)
  *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
+ *   --es transcript '…'    what the next dictations transcribe to (default "Hello from dictation. Send it.")
  */
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -42,6 +43,7 @@ class MainActivity : Activity() {
     private var generating = false
     private var transcribing = false
     private var ignoreSend = false
+    private var dictated = DEFAULT_TRANSCRIPT
     @Volatile private var recording = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,8 +52,10 @@ class MainActivity : Activity() {
         for (flag in listOf("odd", "ignore_send")) {
             if (intent.hasExtra(flag)) sp.edit().putBoolean(flag, intent.getBooleanExtra(flag, false)).apply()
         }
+        intent.getStringExtra("transcript")?.let { sp.edit().putString("transcript", it).apply() }
         val odd = sp.getBoolean("odd", false)
         ignoreSend = sp.getBoolean("ignore_send", false)
+        dictated = sp.getString("transcript", null) ?: DEFAULT_TRANSCRIPT
         transcript = TextView(this).apply { textSize = 14f; text = "Mock ChatGPT (odd labels=$odd)\n" }
         input = EditText(this).apply {
             hint = "Ask ChatGPT"
@@ -142,7 +146,7 @@ class MainActivity : Activity() {
             when (how) {
                 // Like the real app, the transcript includes everything said, spoken commands too.
                 "stop" -> {
-                    input.append("Hello from dictation. Send it.")
+                    input.append(dictated)
                     Log.i(TAG, "TRANSCRIPT READY")
                 }
                 "send" -> send("hello from dictation")
@@ -195,5 +199,6 @@ class MainActivity : Activity() {
     private companion object {
         const val TAG = "MockGPT"
         const val TRANSCRIBE_MS = 2000L
+        const val DEFAULT_TRANSCRIPT = "Hello from dictation. Send it."
     }
 }
