@@ -123,10 +123,16 @@ HandsFree GPT was listening alongside it.
     when the recogniser closes the segment. More words disarm it, so "…send it to my boss" never fires.
   - **Specificity.** The longest phrase wins, and a command fires once per dictation.
 - **Removing the command.** ChatGPT transcribes the command too, so a voice command presses **■, not ↑**.
-  `FINISHING` waits for the transcript to land in the text box, then:
-  - **Strip.** `stripTrailingCommand` turns "What's the forecast? Send it." into "What's the forecast?".
-  - **Set the text** with `ACTION_SET_TEXT`.
-  - **Send or keep.** For "send it" it presses send; for "stop dictation" it leaves the text for editing.
+  `FINISHING` then:
+  - **Waits for the transcript itself.** ChatGPT can bring back its text box, send arrow included, before the
+    transcript is in it ([#1](https://github.com/WillPastor/handsfree-gpt/issues/1)). So it waits for text that
+    wasn't there when the mic was pressed, has stopped changing for a tick, and that ChatGPT's send arrow is
+    enabled for. It gives up after 20 s.
+  - **Strips.** `stripTrailingCommand` turns "What's the forecast? Send it." into "What's the forecast?".
+  - **Sets the text** with `ACTION_SET_TEXT`, and checks on the next tick that the edit took.
+  - **Sends or keeps.** For "send it" it presses send; for "stop dictation" it leaves the text for editing.
+  - **Checks it went.** "Sent" only shows once the text box empties or a reply starts. If neither happens within
+    3 s it presses send once more, then shows "Couldn't send" in amber.
 - **Racing silence detection.** If silence detection fires first, the controller waits 1.2 s, so a command
   still being recognised can win. Silence auto-stop can also be switched off for noisy cars.
 
@@ -164,7 +170,7 @@ it constantly. Then it starts the next dictation.
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (22 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (27 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -179,7 +185,10 @@ it constantly. Then it starts the next dictation.
 - It reproduces the composer and dictation bar, with real content descriptions.
 - It holds the microphone while "dictating", inserts a transcript that includes the spoken command, and streams
   a fake reply.
-- Its *odd labels* mode renames or removes labels to exercise the position fallback.
+- Transcribing takes it 2 s. As the real app appears to, it brings its text box back first, with the send arrow
+  showing but disabled.
+- Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
+  makes the send arrow do nothing, to test that the app says so instead of "Sent".
 
 ## Design choices
 

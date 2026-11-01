@@ -5,6 +5,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **"…send it" on a longer dictation left the message unsent**, with the command still in it, while the pill
+  said "✅ Sent" ([#1](https://github.com/WillPastor/handsfree-gpt/issues/1)). The app acted as soon as ChatGPT's
+  text box came back, before the transcript was in it. It now waits for the transcript itself,
+  and only says "Sent" once ChatGPT has taken the message. Otherwise it presses send once more, then says it
+  couldn't send.
+
+### Changed
+
+- The wait for ChatGPT's transcript is now up to 20 s (was 10 s), so long dictations have time to transcribe.
+- The mock ChatGPT takes 2 s to transcribe, like the real app, and can refuse to send. End-to-end tests cover
+  both.
+
 ## [0.2.0] - 2026-10-31
 
 Finish a dictation without needing silence or touching the phone.
