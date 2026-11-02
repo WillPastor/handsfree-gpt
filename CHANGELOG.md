@@ -3,7 +3,10 @@
 Notable changes to this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-02
+
+ChatGPT's replies can now be read aloud. Checked with the live ChatGPT app on a Samsung Galaxy S26 Ultra running
+Android 16.
 
 ### Added
 
