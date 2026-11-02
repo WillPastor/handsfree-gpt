@@ -185,6 +185,10 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   (continuous mode) or pauses.
 - **Controls while it speaks.** Next ⏭ stops the reading and starts a dictation. Play/pause, ⏮ or the pill stop
   it and pause.
+- **Stopping before it speaks.** ChatGPT fetches the speech for a moment after the press, with nothing to stop
+  yet. A control pressed then waits until the speech starts and stops it at once, so it can't play over the
+  next dictation. If the speech never starts within 8 s of the press, the app moves on. Found by an
+  [automated Codex review of #12](https://github.com/WillPastor/handsfree-gpt/pull/12).
 - **Failures.** If the button can't be found within 5 s, or the reading doesn't start within 8 s even after a
   second press, the app saves a capture and says so in amber.
 
@@ -193,7 +197,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (36 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (40 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -211,8 +215,8 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   a fake reply.
 - Transcribing takes it 2 s. As the real app appears to, it brings its text box back first, with the send arrow
   showing but disabled.
-- A finished reply gets a Read aloud button. It "speaks" for 6 s, as a real audio player playing silence, and
-  shows Stop reading meanwhile.
+- A finished reply gets a Read aloud button. After 0.8 s fetching the speech, which a test can lengthen, it
+  "speaks" for 6 s as a real audio player playing silence, and shows Stop reading meanwhile.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
   makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations
   transcribe to can be set too.

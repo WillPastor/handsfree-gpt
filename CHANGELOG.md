@@ -15,7 +15,8 @@ Android 16.
   (continuous mode) or pausing. Next ⏭ skips the rest and starts talking; play/pause or tapping the pill stops
   it. The app never reads the reply text: it watches ChatGPT's button and whether audio is playing.
 - The mock ChatGPT has a Read aloud button that "speaks" for 6 s, and end-to-end tests cover reading, waiting
-  and skipping. A debug-only receiver lets the tests switch settings.
+  and skipping, including skipping before the speech has started. A debug-only receiver lets the tests switch
+  settings.
 
 ### Fixed
 
