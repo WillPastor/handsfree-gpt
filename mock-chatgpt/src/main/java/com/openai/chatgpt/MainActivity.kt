@@ -30,12 +30,13 @@ import kotlin.math.sqrt
  * "MockGPT" tag so the script can assert on what HandsFree GPT pressed.
  * A dictation takes 2 s to transcribe. Like the real app appears to (issue #1), the text box comes back,
  * its send arrow showing but disabled, before the transcript is in it.
- * A finished reply gets a Read aloud button: after a moment it "speaks" (a real player, playing
- * silence) for 6 s, showing Stop reading meanwhile.
+ * A finished reply gets a Read aloud button: after a moment fetching the speech, it "speaks" (a real
+ * player, playing silence) for 6 s, showing Stop reading meanwhile.
  * Launch flags, remembered across launches:
  *   --ez odd true          labels the automation doesn't know (tests the position fallback)
  *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
  *   --es transcript '…'    what the next dictations transcribe to (default "Hello from dictation. Send it.")
+ *   --ei read_delay 4000   how long Read aloud takes to start speaking, in ms (default 800)
  */
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -50,6 +51,7 @@ class MainActivity : Activity() {
     private var transcribing = false
     private var ignoreSend = false
     private var dictated = DEFAULT_TRANSCRIPT
+    private var readDelay = READ_DELAY_MS
     private var speech: AudioTrack? = null
     private val endReading = Runnable { stopReading("READ ALOUD DONE") }
     @Volatile private var recording = false
@@ -61,9 +63,11 @@ class MainActivity : Activity() {
             if (intent.hasExtra(flag)) sp.edit().putBoolean(flag, intent.getBooleanExtra(flag, false)).apply()
         }
         intent.getStringExtra("transcript")?.let { sp.edit().putString("transcript", it).apply() }
+        if (intent.hasExtra("read_delay")) sp.edit().putInt("read_delay", intent.getIntExtra("read_delay", 0)).apply()
         val odd = sp.getBoolean("odd", false)
         ignoreSend = sp.getBoolean("ignore_send", false)
         dictated = sp.getString("transcript", null) ?: DEFAULT_TRANSCRIPT
+        readDelay = sp.getInt("read_delay", READ_DELAY_MS)
         transcript = TextView(this).apply { textSize = 14f; text = "Mock ChatGPT (odd labels=$odd)\n" }
         input = EditText(this).apply {
             hint = "Ask ChatGPT"
@@ -201,7 +205,7 @@ class MainActivity : Activity() {
             readAloud.contentDescription = "Stop reading"
             Log.i(TAG, "READING ALOUD")
             handler.postDelayed(endReading, READ_MS)
-        }, 800)
+        }, readDelay.toLong())
     }
 
     private fun stopReading(log: String) {
@@ -264,5 +268,6 @@ class MainActivity : Activity() {
         const val TRANSCRIBE_MS = 2000L
         const val DEFAULT_TRANSCRIPT = "Hello from dictation. Send it."
         const val READ_MS = 6000L
+        const val READ_DELAY_MS = 800
     }
 }

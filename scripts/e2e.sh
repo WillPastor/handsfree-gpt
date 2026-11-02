@@ -51,10 +51,11 @@ wait_for() { # until a log line matches $1, for at most $2 seconds
   return 1
 }
 mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) button labels, then go home.
-  # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to.
+  # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to;
+  # a fourth, how long Read aloud takes to start speaking, in ms.
   shell am force-stop com.openai.chatgpt
   shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" --ez ignore_send "${2:-false}" \
-    --es transcript "'${3:-Hello from dictation. Send it.}'" >/dev/null
+    --es transcript "'${3:-Hello from dictation. Send it.}'" --ei read_delay "${4:-800}" >/dev/null
   sleep 2
   shell input keyevent KEYCODE_HOME
   sleep 1
@@ -251,6 +252,25 @@ else
   expect "stops the reading" 'MockGPT.*TAP stop reading'
   check "and starts talking" after 'MockGPT.*TAP mic' 'MockGPT.*TAP stop reading'
   expect_not "without waiting for the reading to end" 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+
+step "12. Next ⏭ while ChatGPT is still fetching the speech: stops the reading once it starts, then talks"
+mock false false "" 4000
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*TAP read aloud' 45 || true
+shell input keyevent KEYCODE_MEDIA_NEXT
+sleep 10 # the speech starts 4 s after the press and would end 6 s later
+collect
+if grep -q 'voice commands unavailable' "$LOG"; then
+  skip "this emulator has no on-device speech recognition"
+else
+  check "⏭ came before the speech started" in_order 'media button: send' 'MockGPT.*READING ALOUD'
+  check "stops the reading once it starts" in_order 'MockGPT.*READING ALOUD' 'MockGPT.*TAP stop reading'
+  check "only then starts talking" after 'MockGPT.*TAP mic' 'MockGPT.*TAP stop reading'
+  expect_not "doesn't let the reply play on" 'MockGPT.*READ ALOUD DONE'
 fi
 handsfree STOP
 app_settings --ez read_aloud false --ez continuous false
