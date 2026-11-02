@@ -66,6 +66,7 @@ class DictationController(
     private var readStarted = false
     private var readRetried = false
     private var quietSince = 0L // when ChatGPT stopped speaking; reading counts as done once it stays quiet
+    private var stopAfterRead: State? = null // stopped before the speech began: stop it once it does, then go here
     private var sawGenerating = false
     private var lastBusyAt = 0L
     private var fallbackStopAt = 0L // non-zero when silence detection is unavailable
@@ -125,10 +126,7 @@ class DictationController(
                 pendingStrip = null
                 go(State.READY)
             }
-            State.READING -> {
-                stopReading()
-                go(State.READY)
-            }
+            State.READING -> stopReadingThen(State.READY)
             State.STOPPING -> Unit
         }
     }
@@ -144,11 +142,7 @@ class DictationController(
                 ui.click(it)
                 if (prefs.waitsForReply) go(State.WAIT_REPLY) else show("✅ Sent · tap to talk", GREY)
             }
-            State.READING -> {
-                stopReading()
-                attempts = 0
-                go(State.WAIT_IDLE)
-            }
+            State.READING -> stopReadingThen(State.WAIT_IDLE)
             else -> Unit
         }
     }
@@ -162,10 +156,7 @@ class DictationController(
                 pendingStrip = null
                 go(State.READY)
             }
-            State.READING -> {
-                stopReading()
-                go(State.READY)
-            }
+            State.READING -> stopReadingThen(State.READY)
             else -> Unit
         }
     }
@@ -212,6 +203,7 @@ class DictationController(
         readStarted = false
         readRetried = false
         quietSince = 0
+        stopAfterRead = null
         when (next) {
             State.READY -> show("🎙 Tap to talk · hold to exit", GREY)
             State.WAIT_IDLE -> {
@@ -358,6 +350,13 @@ class DictationController(
      * shows, or while more audio players are active than when we pressed the button.
      */
     private fun readReply(now: Long, inState: Long) {
+        stopAfterRead?.let { next ->
+            val r = ui.readAloud()
+            val started = r != null && (r.stop != null || players() > readBasePlayers)
+            if (started) stopReading()
+            if (started || now - readPressedAt >= READ_START_MS) leaveReading(next)
+            return
+        }
         val r = ui.readAloud() ?: return
         if (readPressedAt == 0L) {
             when {
@@ -405,12 +404,33 @@ class DictationController(
     }
 
     /**
-     * Stops ChatGPT reading aloud: its stop-reading control, or, if it has none we recognise, the Read
-     * aloud button again while it's still playing (it may toggle).
+     * Stops reading aloud, then goes to [next]. Just after the press, ChatGPT is still fetching the speech
+     * and there's nothing to stop yet. Moving on then would let the speech start over whatever comes next,
+     * so this stays in READING until it starts and stops it then (see [readReply]).
      */
-    private fun stopReading() {
-        val r = ui.readAloud() ?: return
-        (r.stop ?: r.read?.takeIf { readPressedAt > 0 && players() > readBasePlayers })?.let(ui::click)
+    private fun stopReadingThen(next: State) {
+        if (!stopReading() && readPressedAt > 0 && !readStarted) {
+            stopAfterRead = next
+            show("⏹ Stopping the reply…", GREY)
+        } else {
+            leaveReading(next)
+        }
+    }
+
+    private fun leaveReading(next: State) {
+        if (next == State.WAIT_IDLE) attempts = 0
+        go(next)
+    }
+
+    /**
+     * Stops ChatGPT reading aloud: its stop-reading control, or, if it has none we recognise, the Read
+     * aloud button again while it's still playing (it may toggle). False if there was nothing to stop.
+     */
+    private fun stopReading(): Boolean {
+        val r = ui.readAloud() ?: return false
+        val stop = r.stop ?: r.read?.takeIf { readPressedAt > 0 && players() > readBasePlayers } ?: return false
+        ui.click(stop)
+        return true
     }
 
     /** Audio players active right now, whoever they belong to: Android doesn't tell other apps. */
