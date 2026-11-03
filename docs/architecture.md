@@ -181,18 +181,20 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   takes the lowest match: the latest reply. Labels are matched like every other button, and are editable.
 - **ChatGPT's audio bar.** Once Read aloud is pressed, ChatGPT shows a bar at the top of the screen:
   `[pause/play] 00:04 [seek bar] [X]`. Its button says "Pause audio" while the reply plays and "Play audio"
-  otherwise. The X has no label, so it's found by position: the last button after the seek bar, within the
-  same bar. Nothing counts as a bar unless it has a seek bar, so a stray "stop" elsewhere can't be taken for one.
+  otherwise. The X, labelled "Close", is found by position rather than by its label, so it works in any
+  language: it's the last button after the seek bar, within the same bar. Nothing counts as a bar unless it has
+  a seek bar, so a stray "stop" elsewhere can't be taken for one.
 - **Knowing when it's speaking**, without the text, from two signals:
   - The bar's pause button is showing. Any plain "stop" counts too, because nothing else can be stopped then.
   - More audio is playing than when the button was pressed. Android won't say whose audio it is, so the app
     counts players with `getActivePlaybackConfigurations()`. Anything already playing then, such as the app's
     own silent track or navigation, doesn't count as ChatGPT.
 - **Paused or finished.** After a reply ends, the bar stays, showing play, exactly as it does when paused, and
-  a paused reply stops counting as a player. The seek bar tells them apart: partway along means paused, and
-  at either end, finished. The app reads its position from the accessibility tree. A reply the app paused
-  itself counts as paused until it speaks again. While paused, the app waits, however long, and the pill says
-  so. Found in phone testing, where pausing a reply in ChatGPT started the next dictation.
+  a paused reply stops counting as a player. The seek bar tells them apart: an ended reply leaves it at the
+  very end, so anywhere short of that means paused, even back at the start. The app reads its position from
+  the accessibility tree. A reply the app paused itself counts as paused until it speaks again. While paused,
+  the app waits, however long, and the pill says so. Found in phone testing, where pausing a reply in ChatGPT
+  started the next dictation.
 - **Done** once both signals have been quiet for 2 s and it isn't paused, which rides out pauses between
   sentences. Then it listens again (continuous mode) or pauses.
 - **Controls while it speaks.** Play/pause or the pill pause it and play it on. Next ⏭ stops it with the bar's X
@@ -212,7 +214,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (57 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (58 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -235,7 +237,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 - A finished reply gets a Read aloud button. After 0.8 s fetching the speech, which a test can lengthen, it
   shows ChatGPT's audio bar and "speaks" for 6 s as a real audio player playing silence. As in the real app,
   pausing stops the player, and the bar stays after the end, showing play with its seek bar at the end. A test
-  can tap the bar as a person would.
+  can tap the bar, or drag its seek bar back to the start, as a person would.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
   makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations
   transcribe to can be set too.

@@ -75,14 +75,13 @@ class ReadAloud(
     val stop: Btn?,
     /** Plays the speech ("Play audio"): there while it's paused, and once it has ended. */
     val resume: Btn?,
-    /** The bar's X, which stops the speech and closes the bar. It has no label, so it's found by position. */
+    /** The bar's X ("Close"), which stops the speech and closes the bar. Found by position, so any language works. */
     val close: Btn?,
     /** How far along the bar's seek bar is, from 0 to 1, if it says. */
     val position: Float?,
 ) {
-    /** Paused partway through, rather than ended: the seek bar isn't at either end. */
-    val pausedPartway get() =
-        stop == null && resume != null && position != null && position > SEEK_END && position < 1 - SEEK_END
+    /** Paused rather than ended: the seek bar is short of its end, where an ended reply leaves it. */
+    val pausedPartway get() = stop == null && resume != null && position != null && position < 1 - SEEK_END
 
     /** ChatGPT's audio bar is showing, rather than a stop or play button somewhere else. */
     val barShown get() = close != null || position != null
@@ -91,7 +90,7 @@ class ReadAloud(
         (position?.let { String.format(Locale.US, "%.3f", it) } ?: "-") + if (pausedPartway) " (paused partway)" else ""
 
     companion object {
-        /** How near either end of the seek bar, as a fraction of it, counts as the end. */
+        /** How near the end of the seek bar, as a fraction of it, still counts as the end. */
         const val SEEK_END = 0.02f
     }
 }

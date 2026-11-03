@@ -61,7 +61,7 @@ mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) butto
   sleep 1
 }
 overlay_windows() { shell dumpsys window windows | grep -c 'handsfreegpt' || true; }
-user_tap() { # tap the mock's audio bar as a person would: toggle (play/pause) or close
+user_tap() { # use the mock's audio bar as a person would: toggle (play/pause), rewind (to the start) or close
   adb_ shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target "$1" >/dev/null
 }
 no_voice() { grep -q 'voice commands unavailable' "$LOG"; }
@@ -247,7 +247,7 @@ else
   check "but only after the reading has ended" after 'MockGPT.*TAP mic' 'MockGPT.*READ ALOUD DONE'
   CAPTURE="$(capture_now)"
   check "a capture shows the ended reply's audio bar: play, the X, the seek bar at its end" \
-    has 'resume="play audio".* close="".* position=1\.000' <<<"$CAPTURE"
+    has 'resume="play audio".* close="".* position=1\.000$' <<<"$CAPTURE"
   check "captures leave out chat text" lacks 'Stop reading here|word[0-9]' <<<"$CAPTURE"
 fi
 handsfree STOP
@@ -289,7 +289,7 @@ else
 fi
 handsfree STOP
 
-step "13. Pausing a reply in ChatGPT: waits rather than taking it as the end, then listens once it has played on"
+step "13. Pausing a reply in ChatGPT: waits rather than taking it as the end, even back at the start, then listens once it has played on"
 mock false
 begin
 adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
@@ -299,7 +299,9 @@ sleep 2
 user_tap toggle # pause it
 sleep 3
 CAPTURE="$(capture_now)"
-sleep 2         # in all, far longer than the 2 s of quiet that end a reply
+user_tap rewind # drag it back to the start
+sleep 3         # in all, far longer than the 2 s of quiet that end a reply
+AT_START="$(capture_now)"
 user_tap toggle # and play it on
 wait_for 'MockGPT.*READ ALOUD DONE' 15 || true
 sleep 5
@@ -308,6 +310,7 @@ if no_voice; then
   skip "this emulator has no on-device speech recognition"
 else
   check "a capture shows it paused partway" has '\(paused partway\)' <<<"$CAPTURE"
+  check "and still paused once dragged back to the start" has 'position=0\.000 \(paused partway\)' <<<"$AT_START"
   expect "shows the reply as paused" 'Reply paused'
   check "doesn't listen while it's paused" test "$(count 'MockGPT.*TAP mic')" -eq 2
   check "but does once it has played on to the end" after 'MockGPT.*TAP mic' 'MockGPT.*READ ALOUD DONE'

@@ -41,13 +41,15 @@ import kotlin.math.sqrt
  * A finished reply gets a Read aloud button. As in the real app (1.2026.300), pressing it fetches the speech
  * for a moment, then shows an audio bar at the top, [pause/play] 00:00 [seek bar] [X], and "speaks" (a real
  * player, playing silence) for 6 s. Pausing stops the player. Once the speech ends, the bar stays, showing play
- * with its seek bar at the end. The X has no label, also like the real app.
+ * with its seek bar at the end. Its X has no label (the real one says "Close"), so the tests show the app finds
+ * it by position.
  * Launch flags, remembered across launches:
  *   --ez odd true          labels the automation doesn't know (tests the position fallback)
  *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
  *   --es transcript '…'    what the next dictations transcribe to (default "Hello from dictation. Send it.")
  *   --ei read_delay 4000   how long Read aloud takes to start speaking, in ms (default 800)
- * To tap the audio bar as a person would (target "toggle" for play/pause, or "close"):
+ * To use the audio bar as a person would (target "toggle" for play/pause, "rewind" to drag the seek bar back
+ * to the start, or "close"):
  *   adb shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target toggle
  */
 class MainActivity : Activity() {
@@ -93,6 +95,7 @@ class MainActivity : Activity() {
             Log.i(TAG, "USER taps $target")
             when (target) {
                 "toggle" -> audioToggle.performClick()
+                "rewind" -> rewind()
                 "close" -> audioClose.performClick()
             }
         }
@@ -295,6 +298,12 @@ class MainActivity : Activity() {
         silence()
         playedMs = 0
         audioBar.visibility = View.GONE
+    }
+
+    /** Drags the seek bar back to the start: paused speech stays paused, playing speech plays on from there. */
+    private fun rewind() {
+        playedMs = 0
+        showPosition()
     }
 
     /** Speaks from where it was paused, or from the start once it has ended. */
