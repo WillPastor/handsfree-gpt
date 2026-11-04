@@ -210,7 +210,9 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   `[pause/play] 00:04 [seek bar] [X]`. Its button says "Pause audio" while the reply plays and "Play audio"
   otherwise. The X, labelled "Close", is found by position rather than by its label, so it works in any
   language: it's the last button after the seek bar, within the same bar. Nothing counts as a bar unless it has
-  a seek bar, so a stray "stop" elsewhere can't be taken for one.
+  a seek bar, so a stray "stop" elsewhere can't be taken for one. Once there's a bar, only its own button
+  counts, so a dictation's ■ showing at the same time is never taken for the reply's pause
+  ([#18](https://github.com/WillPastor/handsfree-gpt/issues/18)).
 - **Knowing when it's speaking**, without the text, from two signals:
   - The bar's pause button is showing. Any plain "stop" counts too, because nothing else can be stopped then.
   - More audio is playing than when the button was pressed. Android won't say whose audio it is, so the app
@@ -223,11 +225,14 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   the app waits, however long, and the pill says so. Found in phone testing, where pausing a reply in ChatGPT
   started the next dictation.
 - **Done** once both signals have been quiet for 2 s and it isn't paused, which rides out pauses between
-  sentences. Then it listens again (continuous mode) or pauses.
+  sentences. Then it listens again (continuous mode) or pauses. In case a signal gets stuck, the app stops
+  waiting after 10 minutes of speech, and stops the reply first, so it can't play over the next dictation
+  ([#18](https://github.com/WillPastor/handsfree-gpt/issues/18)).
 - **Controls while it speaks.** Play/pause or the pill pause it and play it on. Next ⏭ stops it with the bar's X
   and starts a dictation. Previous ⏮ stops it and waits. If there's no X, they pause it instead.
 - **Turning hands-free off** pauses the reply, so it can be played on from ChatGPT. One still being fetched is
-  paused as soon as it starts, if that's within 8 s of the press. Found by an
+  paused as soon as it starts, if that's within 8 s of the press, even if hands-free is back on by then
+  ([#18](https://github.com/WillPastor/handsfree-gpt/issues/18)). Found by an
   [automated Codex review of #12](https://github.com/WillPastor/handsfree-gpt/pull/12).
 - **ChatGPT off screen.** The reply may play on while you're in another app, so the app keeps track of it and
   waits for ChatGPT to come back, saying so on the pill. ChatGPT's buttons are out of reach meanwhile, so a
@@ -245,7 +250,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (87 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (90 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
