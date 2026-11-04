@@ -38,18 +38,20 @@ import kotlin.math.sqrt
  * its send arrow showing but disabled, before the transcript is in it.
  * Like the real app, every paragraph of a reply is labelled with its own text. The last one mentions "stop" and
  * "done", which must never pass for buttons.
- * A finished reply gets a Read aloud button. As in the real app (1.2026.300), pressing it fetches the speech
- * for a moment, then shows an audio bar at the top, [pause/play] 00:00 [seek bar] [X], and "speaks" (a real
- * player, playing silence) for 6 s. Pausing stops the player. Once the speech ends, the bar stays, showing play
- * with its seek bar at the end. Its X has no label (the real one says "Close"), so the tests show the app finds
- * it by position.
+ * A finished reply gets a Read aloud button, which stays through the next dictation, as in the real app, until
+ * another message is sent. As in the real app (1.2026.300), pressing it fetches the speech for a moment, then
+ * shows an audio bar at the top, [pause/play] 00:00 [seek bar] [X], and "speaks" (a real player, playing silence)
+ * for 6 s. Pausing stops the player. Once the speech ends, the bar stays, showing play with its seek bar at the
+ * end. Its X has no label (the real one says "Close"), so the tests show the app finds it by position.
  * Launch flags, remembered across launches:
  *   --ez odd true          labels the automation doesn't know (tests the position fallback)
  *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
- *   --es transcript '…'    what the next dictations transcribe to (default "Hello from dictation. Send it.")
+ *   --es transcript '…'    what the next dictations transcribe to (default "Hello from dictation. Send it.").
+ *                          With '' they transcribe to nothing: ■ leaves the box as it was, and ↑ sends nothing
  *   --ei read_delay 4000   how long Read aloud takes to start speaking, in ms (default 800)
- * To use the audio bar as a person would (target "toggle" for play/pause, "rewind" to drag the seek bar back
- * to the start, or "close"):
+ *   --ez replied true      the chat already has a reply, with its Read aloud button
+ * To tap something as a person would: the dictation bar's "cancel" (X), "stop" (■) or "send" (↑), or the audio
+ * bar's "toggle" (play/pause), "rewind" (drag the seek bar back to the start) or "close" (X):
  *   adb shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target toggle
  */
 class MainActivity : Activity() {
@@ -59,6 +61,9 @@ class MainActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var composer: LinearLayout
     private lateinit var bar: LinearLayout
+    private lateinit var barCancel: ImageButton
+    private lateinit var barStop: ImageButton
+    private lateinit var barSend: ImageButton
     private lateinit var trailing: ImageButton
     private lateinit var actions: LinearLayout
     private lateinit var audioBar: LinearLayout
@@ -94,17 +99,25 @@ class MainActivity : Activity() {
             val target = intent.getStringExtra("target")
             Log.i(TAG, "USER taps $target")
             when (target) {
-                "toggle" -> audioToggle.performClick()
+                "cancel" -> tap(barCancel)
+                "stop" -> tap(barStop)
+                "send" -> tap(barSend)
+                "toggle" -> tap(audioToggle)
                 "rewind" -> rewind()
-                "close" -> audioClose.performClick()
+                "close" -> tap(audioClose)
             }
+        }
+
+        /** A person can only tap what's on screen. */
+        private fun tap(button: View) {
+            if (button.isShown) button.performClick() else Log.w(TAG, "USER can't tap that: it isn't on screen")
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sp = getSharedPreferences("mock", MODE_PRIVATE)
-        for (flag in listOf("odd", "ignore_send")) {
+        for (flag in listOf("odd", "ignore_send", "replied")) {
             if (intent.hasExtra(flag)) sp.edit().putBoolean(flag, intent.getBooleanExtra(flag, false)).apply()
         }
         intent.getStringExtra("transcript")?.let { sp.edit().putString("transcript", it).apply() }
@@ -131,12 +144,12 @@ class MainActivity : Activity() {
             trailing,
         )
         val waveform = View(this).apply { setBackgroundColor(0xFF555555.toInt()) }
-        bar = row(
-            button(android.R.drawable.ic_menu_close_clear_cancel, "Cancel") { endDictation("cancel") },
-            waveform,
-            button(android.R.drawable.ic_media_pause, if (odd) null else "Stop dictation") { endDictation("stop") },
-            button(android.R.drawable.ic_menu_send, "Send") { endDictation("send") },
-        ).apply { visibility = View.GONE }
+        barCancel = button(android.R.drawable.ic_menu_close_clear_cancel, "Cancel") { endDictation("cancel") }
+        barStop = button(android.R.drawable.ic_media_pause, if (odd) null else "Stop dictation") {
+            endDictation("stop")
+        }
+        barSend = button(android.R.drawable.ic_menu_send, "Send") { endDictation("send") }
+        bar = row(barCancel, waveform, barStop, barSend).apply { visibility = View.GONE }
         // Under the latest reply: [copy] [read aloud].
         actions = row(
             button(android.R.drawable.ic_menu_agenda, "Copy") { Log.i(TAG, "TAP copy") },
@@ -165,6 +178,10 @@ class MainActivity : Activity() {
             addView(actions, LinearLayout.LayoutParams(-1, -2))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
         })
+        if (sp.getBoolean("replied", false)) {
+            transcript.append("\nYou: an earlier question\nGPT: an earlier reply")
+            showReply()
+        }
         updateTrailing()
     }
 
@@ -221,7 +238,6 @@ class MainActivity : Activity() {
 
     private fun startDictation() {
         Log.i(TAG, "TAP mic -> dictation started")
-        actions.visibility = View.GONE // a new turn
         composer.visibility = View.GONE
         bar.visibility = View.VISIBLE
         recording = true
@@ -238,13 +254,14 @@ class MainActivity : Activity() {
         updateTrailing()
         handler.postDelayed({
             transcribing = false
-            when (how) {
+            when {
+                dictated.isEmpty() -> Log.i(TAG, "TRANSCRIPT EMPTY") // nothing to put in the box, or to send
                 // Like the real app, the transcript includes everything said, spoken commands too.
-                "stop" -> {
+                how == "stop" -> {
                     input.append(dictated)
                     Log.i(TAG, "TRANSCRIPT READY")
                 }
-                "send" -> send("hello from dictation")
+                how == "send" -> send("hello from dictation")
             }
             updateTrailing()
         }, TRANSCRIBE_MS)
@@ -252,6 +269,7 @@ class MainActivity : Activity() {
 
     private fun send(text: String) {
         Log.i(TAG, "SENT: $text")
+        actions.visibility = View.GONE // a new turn
         transcript.append("\nYou: $text\nGPT:")
         input.setText("")
         generating = true
@@ -264,14 +282,19 @@ class MainActivity : Activity() {
                 if (words < 30) handler.postDelayed(this, 100) else {
                     generating = false
                     updateTrailing()
-                    lastParagraph.text = LAST_PARAGRAPH
-                    lastParagraph.contentDescription = LAST_PARAGRAPH
-                    lastParagraph.visibility = View.VISIBLE
-                    actions.visibility = View.VISIBLE
+                    showReply()
                     Log.i(TAG, "REPLY DONE")
                 }
             }
         })
+    }
+
+    /** A finished reply: its last paragraph, labelled with its own text, then Copy and Read aloud under it. */
+    private fun showReply() {
+        lastParagraph.text = LAST_PARAGRAPH
+        lastParagraph.contentDescription = LAST_PARAGRAPH
+        lastParagraph.visibility = View.VISIBLE
+        actions.visibility = View.VISIBLE
     }
 
     /** Fetches the speech for a moment, then reads the reply out from the start. */
