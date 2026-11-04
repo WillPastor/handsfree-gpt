@@ -376,6 +376,32 @@ fi
 handsfree STOP
 app_settings --ez read_aloud false --ez continuous false
 
+step "16. Leaving ChatGPT while a reply is read: keeps waiting for it, a tap brings ChatGPT back, and it listens once the reply has ended"
+mock false
+app_settings --ez read_aloud true --ez continuous true
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*READING ALOUD' 45 || true
+shell input keyevent KEYCODE_HOME # the reply plays on, out of sight
+sleep 2
+tap_pill
+wait_for 'MockGPT.*READ ALOUD DONE' 10 || true
+sleep 5
+collect
+if no_voice; then
+  skip "this emulator has no on-device speech recognition"
+else
+  expect "keeps waiting for the reply while ChatGPT is off screen" 'READING: .*Open ChatGPT to continue'
+  expect_not "rather than giving up on it" 'left the screen'
+  check "a tap brings ChatGPT back, and the pill shows the reply again" \
+    after 'READING: .*Reading the reply' 'READING: .*Open ChatGPT to continue'
+  expect_not "without pausing or closing the reply" 'MockGPT.*TAP (pause|close) audio'
+  check "listens again only once the reply has ended" after 'MockGPT.*TAP mic' 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+app_settings --ez read_aloud false --ez continuous false
+
 step "Stability"
 check "no crashes" test "$(adb_ logcat -d -b crash | grep -c 'com.handsfreegpt' || true)" -eq 0
 
