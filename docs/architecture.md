@@ -229,6 +229,10 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 - **Turning hands-free off** pauses the reply, so it can be played on from ChatGPT. One still being fetched is
   paused as soon as it starts, if that's within 8 s of the press. Found by an
   [automated Codex review of #12](https://github.com/WillPastor/handsfree-gpt/pull/12).
+- **ChatGPT off screen.** The reply may play on while you're in another app, so the app keeps track of it and
+  waits for ChatGPT to come back, saying so on the pill. ChatGPT's buttons are out of reach meanwhile, so a
+  control brings ChatGPT back, and the next press acts on the reply. Turning hands-free off can't pause it
+  then. Also found by the Codex review of #12.
 - **Stopping before it speaks.** ChatGPT fetches the speech for a moment after the press, with nothing to stop
   yet, and any bar showing is still the previous reply's. A control pressed then waits until the speech starts
   and stops it at once, so it can't play over the next dictation. If the speech never starts within 8 s of the
@@ -241,7 +245,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (82 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (87 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
