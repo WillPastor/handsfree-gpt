@@ -55,6 +55,7 @@ class DictationController(
     private var sending = false // this dictation (or the text in the box) is meant to be sent
     private var pressedSend = false // we pressed the dictation bar's ↑ rather than ■
     private var endedInChatGpt = false // the dictation ended in ChatGPT itself (its own X, ■ or ↑), not by us
+    private var replyStarted = false // a reply was showing as the dictation bar went, so ChatGPT took the message
     private var pendingSend = false // press the composer's send once the transcript lands
     private var pendingStrip: String? = null // spoken command to remove from the transcript first
     private var textBefore: String? = null // the text box when we pressed the mic; null once the transcript is in
@@ -217,6 +218,7 @@ class DictationController(
         stopRetried = false
         missingTicks = 0
         notDictatingTicks = 0
+        replyStarted = false
         lastMicRect = null
         lastText = null
         stripTarget = null
@@ -321,14 +323,23 @@ class DictationController(
 
             State.LISTENING -> when {
                 // ChatGPT (or you) ended the dictation; wait ~0.5 s to be sure it isn't a flicker.
-                !s.dictating -> if (++notDictatingTicks >= 2) afterDictation()
+                !s.dictating -> {
+                    if (s.generating) replyStarted = true
+                    if (++notDictatingTicks >= 2) afterDictation()
+                }
                 fallbackStopAt > 0 && now >= fallbackStopAt -> finishDictation()
                 graceUntil > 0 && now >= graceUntil -> finishDictation()
-                else -> notDictatingTicks = 0
+                else -> {
+                    notDictatingTicks = 0
+                    replyStarted = false
+                }
             }
 
             State.STOPPING -> when {
-                !s.dictating -> afterDictation()
+                !s.dictating -> {
+                    replyStarted = s.generating
+                    afterDictation()
+                }
                 inState > 8000 && !stopRetried -> {
                     // Our press may have been missed. A disabled button means ChatGPT is still
                     // transcribing, so leave it alone.
@@ -583,7 +594,7 @@ class DictationController(
      */
     private fun checkSent(s: Snapshot, text: String, inState: Long, now: Long) {
         if (s.generating) {
-            sent()
+            sent(replying = true)
             return
         }
         val fresh = text.isNotBlank() && text != textBefore
@@ -619,7 +630,7 @@ class DictationController(
     /** ChatGPT has taken the message once the text box empties or a reply starts. If not, press send once more. */
     private fun confirmSent(s: Snapshot, boxEmpty: Boolean, send: Btn?, now: Long) {
         when {
-            s.generating || boxEmpty -> sent()
+            s.generating || boxEmpty -> sent(replying = s.generating)
             now - sentAt < SEND_CONFIRM_MS -> Unit
             sendTries < 2 && send != null -> {
                 sendTries++
@@ -630,10 +641,11 @@ class DictationController(
         }
     }
 
-    /** ChatGPT has taken the message: wait for the reply, or say it went. */
-    private fun sent() {
+    /** ChatGPT has taken the message: wait for the reply, or say it went. [replying]: the reply has started. */
+    private fun sent(replying: Boolean = false) {
         if (prefs.waitsForReply) {
             go(State.WAIT_REPLY)
+            sawGenerating = replying // a short reply may be over before WAIT_REPLY first looks
         } else {
             go(State.READY)
             show("✅ Sent · tap to talk", GREY)
@@ -724,11 +736,18 @@ class DictationController(
     /**
      * The dictation bar has gone. Unless we pressed ■ just to keep the text, FINISHING sees what ChatGPT does
      * with it: only ChatGPT taking a message counts as sent, so the app never waits for a reply to nothing (#13).
+     * A reply showing already counts at once, as a short one can be over before FINISHING first looks (Codex
+     * review of #16).
      */
     private fun afterDictation() {
         stopListening()
         endedInChatGpt = state != State.STOPPING
-        go(if (pendingStrip != null || sending || endedInChatGpt) State.FINISHING else State.READY)
+        val watch = pendingStrip != null || sending || endedInChatGpt
+        when {
+            watch && replyStarted && pendingStrip == null && !pendingSend -> sent(replying = true)
+            watch -> go(State.FINISHING)
+            else -> go(State.READY)
+        }
         sending = false
     }
 
