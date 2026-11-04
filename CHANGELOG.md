@@ -43,8 +43,10 @@ Android 16.
     own ↑ still sends.
   - A dictation sent with nothing in it shows "🤐 Nothing to send".
   - Next ⏭ with text in the box now checks that it went too, as a voice command's send does.
-  - End-to-end tests tap the mock's own X, ■ and ↑ during a dictation, and send a dictation with nothing in it,
-    in a chat that already has a reply.
+  - A reply already showing as the dictation bar goes counts as sent at once. A short one could otherwise be over
+    before the app first looked (Codex review of #16).
+  - End-to-end tests tap the mock's own X, ■ and ↑ during a dictation, send a dictation with nothing in it, and
+    have ChatGPT reply within half a second, in a chat that already has a reply.
 - **Chat text could pass for ChatGPT's buttons.** ChatGPT labels each paragraph of a reply with its own text.
   A reply with "stop" or "done" near the bottom of the screen could therefore look like a stop button, and the
   app would wait for it to go away. Text that can't be clicked no longer counts.

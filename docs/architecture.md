@@ -184,6 +184,9 @@ talking ([#13](https://github.com/WillPastor/handsfree-gpt/issues/13), found in 
   - A reply starts: it was sent with ChatGPT's own ↑, and counts as sent.
   - The transcript lands in the text box: ChatGPT's own ■, so the text stays there.
   - Nothing, for 2 s: ChatGPT's own X. That counts as cancelled, as saying "cancel that" does.
+- **A reply already showing as the dictation bar goes** counts as sent straight away. The app looks at ChatGPT
+  every 250 ms, and waits about half a second to be sure the bar has gone, so a short reply could otherwise be
+  over before it first looked (Codex review of #16).
 - **Busy or idle.** While ChatGPT transcribes, it shows its send arrow before the text is in the box
   ([#1](https://github.com/WillPastor/handsfree-gpt/issues/1)). A send arrow that is disabled, or showing over an
   empty box, counts as busy, as does any change on screen.
@@ -238,7 +241,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (76 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (82 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -255,7 +258,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 - It holds the microphone while "dictating", inserts a transcript that includes the spoken command, and streams
   a fake reply.
 - Transcribing takes it 2 s. As the real app appears to, it brings its text box back first, with the send arrow
-  showing but disabled.
+  showing but disabled. Its *quick* mode transcribes at once and finishes each reply in about 0.4 s.
 - Each reply ends with a paragraph labelled with its own text, as ChatGPT labels them, which mentions "stop"
   and "done".
 - A finished reply gets a Read aloud button, which stays through the next dictation, as in the real app. After
