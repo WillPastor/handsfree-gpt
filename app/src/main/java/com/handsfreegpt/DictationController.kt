@@ -421,14 +421,14 @@ class DictationController(
                 if (!readPaused) show("⏸ Reply paused · tap to resume", GREY)
                 readPaused = true
             }
-            speaking && inState < READ_MAX_MS -> {
+            // Played on. The time limit is for speaking, so it starts again, however long the pause was.
+            speaking && readPaused -> {
                 quietSince = 0
-                if (readPaused) {
-                    stateSince = now // the time limit is for speaking, so it starts again
-                    show(READING_STATUS, GREY)
-                }
+                stateSince = now
+                show(READING_STATUS, GREY)
                 readPaused = false
             }
+            speaking && inState < READ_MAX_MS -> quietSince = 0
             quietSince == 0L -> quietSince = now
             // Wait out short pauses between sentences before calling it done.
             now - quietSince >= READ_DONE_QUIET_MS -> afterReading()
