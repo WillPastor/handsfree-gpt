@@ -19,8 +19,9 @@ import android.util.Log
  *   STARTING   → wait for the dictation bar to appear
  *   LISTENING  → until you stop talking, say a command ("send it"), or press a car/headset button
  *   STOPPING   → press ■ (or ↑) and wait for the bar to go away
- *   FINISHING  → wait for the transcript to land in the text box, remove a spoken command, send, check it went
- *   WAIT_REPLY → (continuous or read aloud) wait for the reply to finish
+ *   FINISHING  → wait for the transcript to land in the text box, remove a spoken command, send, check it went.
+ *                After ↑, or a dictation ended in ChatGPT itself (its own X, ■ or ↑), see what came of it
+ *   WAIT_REPLY → (continuous or read aloud) once ChatGPT has taken a message, wait for the reply to finish
  *   READING    → (read aloud) press ChatGPT's Read aloud, wait until it stops speaking, then listen again
  *   READY      → paused; tap the floating pill or press play to talk again
  *
@@ -51,8 +52,9 @@ class DictationController(
     private var attempts = 0
     private var beeped = false
     private var stopRetried = false
-    private var sending = false // this dictation is meant to be sent
+    private var sending = false // this dictation (or the text in the box) is meant to be sent
     private var pressedSend = false // we pressed the dictation bar's ↑ rather than ■
+    private var endedInChatGpt = false // the dictation ended in ChatGPT itself (its own X, ■ or ↑), not by us
     private var pendingSend = false // press the composer's send once the transcript lands
     private var pendingStrip: String? = null // spoken command to remove from the transcript first
     private var textBefore: String? = null // the text box when we pressed the mic; null once the transcript is in
@@ -153,15 +155,16 @@ class DictationController(
     }
 
     /**
-     * Finish and send (e.g. the ⏭ button). When paused with text in the box, sends that. While a reply
-     * is being read aloud, skips the rest of it and starts talking.
+     * Finish and send (e.g. the ⏭ button). When paused with text in the box, sends that, and checks that
+     * ChatGPT took it. While a reply is being read aloud, skips the rest of it and starts talking.
      */
     fun sendNow() {
         when (state) {
             State.LISTENING -> finishDictation(send = true)
-            State.READY -> ui.snapshot()?.takeIf { it.idle }?.send?.let {
-                ui.click(it)
-                if (prefs.waitsForReply) go(State.WAIT_REPLY) else show("✅ Sent · tap to talk", GREY)
+            State.READY -> ui.snapshot()?.takeIf { it.idle }?.send?.takeIf { it.node.isEnabled }?.let {
+                sending = true
+                go(State.FINISHING)
+                pressSend(it)
             }
             State.READING -> stopReadingThen(State.WAIT_IDLE)
             else -> Unit
@@ -228,6 +231,7 @@ class DictationController(
         stopAfterRead = null
         pausePressedAt = 0
         readPaused = false
+        lastBusyAt = stateSince
         when (next) {
             State.READY -> show("🎙 Tap to talk · hold to exit", GREY)
             State.WAIT_IDLE -> {
@@ -239,7 +243,6 @@ class DictationController(
             State.STOPPING, State.FINISHING -> show(if (sending) "📨 Sending…" else "⏹ Stopping…", GREY)
             State.WAIT_REPLY -> {
                 sawGenerating = false
-                lastBusyAt = stateSince
                 show("💬 Waiting for reply…", GREY)
             }
             State.READING -> show(READING_STATUS, GREY)
@@ -502,7 +505,8 @@ class DictationController(
     /**
      * After ■: wait for the transcript to land in the text box, strip a spoken command, send, then check
      * that ChatGPT took the message. ChatGPT can bring back its text box, send arrow included, before the
-     * transcript is in it (issue #1), so we wait for the text itself.
+     * transcript is in it (issue #1), so we wait for the text itself. After ↑, or a dictation ended in
+     * ChatGPT itself, [checkSent] sees what came of it instead.
      */
     private fun finishTranscript(s: Snapshot, inState: Long, now: Long) {
         val input = s.input
@@ -510,6 +514,10 @@ class DictationController(
         val send = s.send?.takeIf { it.node.isEnabled }
         if (sentAt > 0) {
             confirmSent(s, input != null && text.isBlank(), send, now)
+            return
+        }
+        if (pendingStrip == null && !pendingSend) {
+            checkSent(s, text, inState, now)
             return
         }
         // The transcript is in once there's new text, it has stopped changing and ChatGPT will send it.
@@ -564,21 +572,54 @@ class DictationController(
             return
         }
         if (send == null) return // not ready to send yet
+        pressSend(send)
+    }
+
+    /**
+     * After ↑, or a dictation that ended in ChatGPT itself (its own X, ■ or ↑): it only counts as sent once a
+     * reply starts (#13). There may have been nothing in it to send, and ChatGPT's X sends nothing at all, so this
+     * waits until ChatGPT replies, or looks idle and quiet, and then says what came of it. While ChatGPT
+     * transcribes, it shows its send arrow (issue #1), so that counts as busy.
+     */
+    private fun checkSent(s: Snapshot, text: String, inState: Long, now: Long) {
+        if (s.generating) {
+            sent()
+            return
+        }
+        val fresh = text.isNotBlank() && text != textBefore
+        val transcribing = s.send?.let { !it.node.isEnabled || text.isBlank() } == true
+        if (!s.idle || transcribing) lastBusyAt = now
+        // After our ↑, give ChatGPT time to send it: a long dictation can take a while to transcribe.
+        val quiet = now - maxOf(lastBusyAt, lastContentChangeAt) >= NOTHING_CAME_MS &&
+            (endedInChatGpt || inState >= SEND_TAKES_MS)
+        if (!quiet && (inState <= FINISH_TIMEOUT_MS || s.dictating)) return
+        when {
+            fresh && endedInChatGpt -> { // its ■: the transcript stays in the box
+                go(State.READY)
+                show("📝 Text is in the box · tap to talk", GREY)
+            }
+            fresh -> couldNotSend("ChatGPT didn't send the dictation")
+            endedInChatGpt -> cancelDictation() // its X, the same as saying "cancel that"
+            else -> {
+                capture("dictation sent nothing")
+                go(State.READY)
+                show("🤐 Nothing to send · tap to talk", GREY)
+            }
+        }
+    }
+
+    /** Presses the composer's send. FINISHING then checks that ChatGPT took the message. */
+    private fun pressSend(send: Btn) {
         pendingSend = false
         sendTries = 1
-        sentAt = now
+        sentAt = SystemClock.elapsedRealtime()
         ui.click(send)
     }
 
     /** ChatGPT has taken the message once the text box empties or a reply starts. If not, press send once more. */
     private fun confirmSent(s: Snapshot, boxEmpty: Boolean, send: Btn?, now: Long) {
         when {
-            s.generating || boxEmpty -> if (prefs.waitsForReply) {
-                go(State.WAIT_REPLY)
-            } else {
-                go(State.READY)
-                show("✅ Sent · tap to talk", GREY)
-            }
+            s.generating || boxEmpty -> sent()
             now - sentAt < SEND_CONFIRM_MS -> Unit
             sendTries < 2 && send != null -> {
                 sendTries++
@@ -586,6 +627,16 @@ class DictationController(
                 ui.click(send)
             }
             else -> couldNotSend("message wasn't sent")
+        }
+    }
+
+    /** ChatGPT has taken the message: wait for the reply, or say it went. */
+    private fun sent() {
+        if (prefs.waitsForReply) {
+            go(State.WAIT_REPLY)
+        } else {
+            go(State.READY)
+            show("✅ Sent · tap to talk", GREY)
         }
     }
 
@@ -601,6 +652,9 @@ class DictationController(
         go(State.LISTENING)
         fallbackStopAt = 0
         graceUntil = 0
+        sending = false
+        pendingSend = false
+        pendingStrip = null
         if (service.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             onUnavailable("no microphone permission")
             return
@@ -655,7 +709,7 @@ class DictationController(
         go(State.STOPPING)
     }
 
-    /** Nothing was said, or you asked to cancel: throw the dictation away (X) and pause. */
+    /** Nothing was said, or you asked to cancel: throw the dictation away (X, unless ChatGPT already has) and pause. */
     private fun cancelDictation(message: String = "🗑 Dictation cancelled · tap to talk") {
         stopListening()
         val s = ui.snapshot()
@@ -667,18 +721,14 @@ class DictationController(
         show(message, GREY)
     }
 
+    /**
+     * The dictation bar has gone. Unless we pressed ■ just to keep the text, FINISHING sees what ChatGPT does
+     * with it: only ChatGPT taking a message counts as sent, so the app never waits for a reply to nothing (#13).
+     */
     private fun afterDictation() {
         stopListening()
-        when {
-            pendingStrip != null || pendingSend -> go(State.FINISHING)
-            prefs.continuous -> go(State.WAIT_REPLY)
-            sending && prefs.readAloud -> go(State.WAIT_REPLY)
-            sending -> {
-                go(State.READY)
-                show("✅ Sent · tap to talk", GREY)
-            }
-            else -> go(State.READY)
-        }
+        endedInChatGpt = state != State.STOPPING
+        go(if (pendingStrip != null || sending || endedInChatGpt) State.FINISHING else State.READY)
         sending = false
     }
 
@@ -767,6 +817,8 @@ class DictationController(
         const val REPLY_QUIET_MS = 1500L
         const val FINISH_TIMEOUT_MS = 20_000L // a long dictation can take ChatGPT a while to transcribe
         const val SEND_CONFIRM_MS = 3000L
+        const val NOTHING_CAME_MS = 2000L // idle and quiet this long after a dictation, so nothing more is coming
+        const val SEND_TAKES_MS = 8000L // how long ChatGPT may take to transcribe and send a dictation after ↑
         const val READ_FIND_MS = 5000L
         const val READ_START_MS = 8000L // ChatGPT fetches the speech before it starts
         const val READ_DONE_QUIET_MS = 2000L
