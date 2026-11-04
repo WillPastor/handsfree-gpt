@@ -53,10 +53,12 @@ stateDiagram-v2
     STARTING --> WAIT_IDLE: no bar after 3.5 s (2 retries)
     LISTENING --> STOPPING: send it, next button, or silence, press ■ or ↑
     LISTENING --> READY: cancel that, previous button, or nothing said, press X
-    STOPPING --> FINISHING: a command to remove or a send pending
-    STOPPING --> READY: dictation bar gone
-    FINISHING --> READY: command removed, message sent
-    FINISHING --> WAIT_REPLY: sent (continuous or read aloud)
+    LISTENING --> FINISHING: ended in ChatGPT itself (its own X, ■ or ↑)
+    STOPPING --> FINISHING: ↑ pressed, a command to remove, or a send pending
+    STOPPING --> READY: ■ pressed to keep the text
+    FINISHING --> READY: text kept, cancelled, nothing to send, or sent
+    FINISHING --> WAIT_REPLY: ChatGPT took the message (continuous or read aloud)
+    READY --> FINISHING: next button with text in the box, press send
     WAIT_REPLY --> WAIT_IDLE: reply finished (continuous)
     WAIT_REPLY --> READING: reply finished (read aloud), press Read aloud
     READING --> WAIT_IDLE: done speaking (continuous), or next button
@@ -167,11 +169,33 @@ HandsFree GPT was listening alongside it.
   - **No resume controls.** System UI's "resume playback" connection is refused, because there's nothing to
     resume.
 
+### Knowing whether anything was sent
+
+A message only counts as sent once ChatGPT has taken it: a reply starts, or the text box empties after the app
+pressed send. Until then the app neither says "Sent" nor waits for a reply. It used to wait whenever a dictation
+ended in continuous mode, even when nothing had been sent. That wait gave up after 8 s of quiet, and read aloud
+then read out the reply on screen, which was the previous one. Continuous mode then listened again, with nobody
+talking ([#13](https://github.com/WillPastor/handsfree-gpt/issues/13), found in phone testing).
+- **After ↑**, ChatGPT transcribes the dictation and sends it itself, if there was anything in it. The app waits
+  for the reply to start. If ChatGPT goes idle and quiet for 2 s instead, and at least 8 s have passed since ↑
+  (a long dictation takes a while to transcribe), nothing was sent. The pill says "Nothing to send", and the app
+  saves a capture. If the transcript lands in the box instead and stays there, it says it couldn't send.
+- **A dictation ended in ChatGPT itself** is read from what ChatGPT does next:
+  - A reply starts: it was sent with ChatGPT's own ↑, and counts as sent.
+  - The transcript lands in the text box: ChatGPT's own ■, so the text stays there.
+  - Nothing, for 2 s: ChatGPT's own X. That counts as cancelled, as saying "cancel that" does.
+- **Busy or idle.** While ChatGPT transcribes, it shows its send arrow before the text is in the box
+  ([#1](https://github.com/WillPastor/handsfree-gpt/issues/1)). A send arrow that is disabled, or showing over an
+  empty box, counts as busy, as does any change on screen.
+- **Sending the text in the box** with next ⏭ is checked the same way as a voice command's send: send is
+  pressed once more if nothing happens within 3 s, and then the pill says it couldn't send.
+
 ### Knowing when a reply has finished (continuous mode and read aloud)
 
-While a reply streams, ChatGPT shows a stop button next to the mic (*generating*). The controller waits until
-the composer is idle again **and** the window content hasn't changed for 1.5 s, because streaming text changes
-it constantly. Then it reads the reply aloud, starts the next dictation, or both.
+Once ChatGPT has taken a message, the app waits for its reply. While a reply streams, ChatGPT shows a stop
+button next to the mic (*generating*). The controller waits until the composer is idle again **and** the window
+content hasn't changed for 1.5 s, because streaming text changes it constantly. Then it reads the reply aloud,
+starts the next dictation, or both.
 
 ### Reading replies aloud
 
@@ -214,7 +238,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (58 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (76 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -234,13 +258,15 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   showing but disabled.
 - Each reply ends with a paragraph labelled with its own text, as ChatGPT labels them, which mentions "stop"
   and "done".
-- A finished reply gets a Read aloud button. After 0.8 s fetching the speech, which a test can lengthen, it
-  shows ChatGPT's audio bar and "speaks" for 6 s as a real audio player playing silence. As in the real app,
-  pausing stops the player, and the bar stays after the end, showing play with its seek bar at the end. A test
-  can tap the bar, or drag its seek bar back to the start, as a person would.
+- A finished reply gets a Read aloud button, which stays through the next dictation, as in the real app. After
+  0.8 s fetching the speech, which a test can lengthen, it shows ChatGPT's audio bar and "speaks" for 6 s as a
+  real audio player playing silence. As in the real app, pausing stops the player, and the bar stays after the
+  end, showing play with its seek bar at the end. A test can tap the bar, or drag its seek bar back to the
+  start, as a person would.
+- A test can tap the dictation bar's own X, ■ and ↑ too, and start the mock with a reply already in the chat.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
   makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations
-  transcribe to can be set too.
+  transcribe to can be set too, including nothing at all.
 - Debug builds have receivers, restricted to adb, that switch settings and take captures, so scenarios can turn
   on continuous mode and read aloud, and check what a capture shows.
 
