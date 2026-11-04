@@ -50,6 +50,7 @@ import kotlin.math.sqrt
  *                          With '' they transcribe to nothing: ■ leaves the box as it was, and ↑ sends nothing
  *   --ei read_delay 4000   how long Read aloud takes to start speaking, in ms (default 800)
  *   --ez replied true      the chat already has a reply, with its Read aloud button
+ *   --ez quick true        dictations transcribe at once, and replies are over in about 0.4 s
  * To tap something as a person would: the dictation bar's "cancel" (X), "stop" (■) or "send" (↑), or the audio
  * bar's "toggle" (play/pause), "rewind" (drag the seek bar back to the start) or "close" (X):
  *   adb shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target toggle
@@ -76,6 +77,7 @@ class MainActivity : Activity() {
     private var ignoreSend = false
     private var dictated = DEFAULT_TRANSCRIPT
     private var readDelay = READ_DELAY_MS
+    private var quick = false
     private var speech: AudioTrack? = null
     private var playedMs = 0
     private val startSpeaking = Runnable { play() }
@@ -117,7 +119,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sp = getSharedPreferences("mock", MODE_PRIVATE)
-        for (flag in listOf("odd", "ignore_send", "replied")) {
+        for (flag in listOf("odd", "ignore_send", "replied", "quick")) {
             if (intent.hasExtra(flag)) sp.edit().putBoolean(flag, intent.getBooleanExtra(flag, false)).apply()
         }
         intent.getStringExtra("transcript")?.let { sp.edit().putString("transcript", it).apply() }
@@ -126,6 +128,7 @@ class MainActivity : Activity() {
         ignoreSend = sp.getBoolean("ignore_send", false)
         dictated = sp.getString("transcript", null) ?: DEFAULT_TRANSCRIPT
         readDelay = sp.getInt("read_delay", READ_DELAY_MS)
+        quick = sp.getBoolean("quick", false)
         transcript = TextView(this).apply { textSize = 14f; text = "Mock ChatGPT (odd labels=$odd)\n" }
         lastParagraph = TextView(this).apply { textSize = 14f; visibility = View.GONE }
         input = EditText(this).apply {
@@ -264,7 +267,7 @@ class MainActivity : Activity() {
                 how == "send" -> send("hello from dictation")
             }
             updateTrailing()
-        }, TRANSCRIBE_MS)
+        }, if (quick) 0 else TRANSCRIBE_MS)
     }
 
     private fun send(text: String) {
@@ -275,11 +278,12 @@ class MainActivity : Activity() {
         generating = true
         updateTrailing()
         var words = 0
+        val length = if (quick) 5 else 30 // a word every 100 ms
         handler.post(object : Runnable {
             override fun run() {
                 if (!generating) return
                 transcript.append(" word${++words}")
-                if (words < 30) handler.postDelayed(this, 100) else {
+                if (words < length) handler.postDelayed(this, 100) else {
                     generating = false
                     updateTrailing()
                     showReply()
