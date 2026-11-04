@@ -3,9 +3,45 @@
 Notable changes to this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-02
+
+ChatGPT's replies can now be read aloud. Checked with the live ChatGPT app on a Samsung Galaxy S26 Ultra running
+Android 16.
+
+### Added
+
+- **Read replies aloud** ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)). When a reply finishes, the
+  app presses ChatGPT's own Read aloud button, then waits until ChatGPT stops speaking before listening again
+  (continuous mode) or pausing.
+  - Play/pause or tapping the pill pauses and resumes the reply. Next ⏭ skips the rest and starts talking, and
+    previous ⏮ stops it.
+  - A reply you pause in ChatGPT stays paused: the app waits rather than taking the pause for the end.
+  - Turning hands-free off pauses the reply, even one ChatGPT is still fetching.
+  - Switching to another app mid-reply doesn't lose track of it: the app waits for ChatGPT to come back.
+  - The app never reads the reply text. It watches ChatGPT's buttons, its audio bar, and whether audio is playing.
+- The mock ChatGPT has a Read aloud button and ChatGPT's audio bar, and "speaks" for 6 s. End-to-end tests
+  cover:
+  - reading, and waiting for the end
+  - pausing, in ChatGPT and with play/pause
+  - skipping, including before the speech has started
+  - turning hands-free off mid-reply
+  - switching to another app mid-reply
+
+  Debug-only receivers let the tests switch settings and take captures.
+
+### Changed
+
+- **Shorter UI captures.** Layout wrappers with nothing of their own are left out, so a capture fits in a
+  message. Read-aloud controls are listed at the top. Captures pasted from a phone were being cut off.
 
 ### Fixed
+
+- **Chat text could pass for ChatGPT's buttons.** ChatGPT labels each paragraph of a reply with its own text.
+  A reply with "stop" or "done" near the bottom of the screen could therefore look like a stop button, and the
+  app would wait for it to go away. Text that can't be clicked no longer counts.
+- **UI captures could include chat text**, despite the privacy notes. ChatGPT repeats each paragraph in its
+  accessibility description, and captures showed the first 100 characters of those, short paragraphs and the
+  text box in full. Now they show only the length.
 
 - **A message that itself ended in "send it" lost those words.** After removing the spoken command, the 0.2.1
   fix could remove the phrase a second time, so "Repeat the words send it. Send it." was sent as "Repeat the

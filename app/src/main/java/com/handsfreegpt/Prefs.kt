@@ -49,6 +49,12 @@ class Prefs(context: Context) {
     var continuous by boolPref("continuous", false)
     var beeps by boolPref("beeps", true)
 
+    /** Press ChatGPT's own Read aloud button once a reply has finished. */
+    var readAloud by boolPref("read_aloud", false)
+
+    /** After sending, wait for the reply: to listen again, to read it aloud, or both. */
+    val waitsForReply get() = continuous || readAloud
+
     /** Vertical position of the floating status pill, in px; -1 = default. */
     var overlayY by intPref("overlay_y", -1)
 
@@ -56,12 +62,18 @@ class Prefs(context: Context) {
     var stopWords by stringPref("stop_words", DEFAULT_STOP_WORDS)
     var sendWords by stringPref("send_words", DEFAULT_SEND_WORDS)
     var cancelWords by stringPref("cancel_words", DEFAULT_CANCEL_WORDS)
+    var readAloudWords by stringPref("read_aloud_words", DEFAULT_READ_ALOUD_WORDS)
+    var stopReadingWords by stringPref("stop_reading_words", DEFAULT_STOP_READING_WORDS)
+    var resumeReadingWords by stringPref("resume_reading_words", DEFAULT_RESUME_READING_WORDS)
 
     fun resetButtonWords() {
         micWords = DEFAULT_MIC_WORDS
         stopWords = DEFAULT_STOP_WORDS
         sendWords = DEFAULT_SEND_WORDS
         cancelWords = DEFAULT_CANCEL_WORDS
+        readAloudWords = DEFAULT_READ_ALOUD_WORDS
+        stopReadingWords = DEFAULT_STOP_READING_WORDS
+        resumeReadingWords = DEFAULT_RESUME_READING_WORDS
     }
 
     fun resetPhrases() {
@@ -94,6 +106,12 @@ class Prefs(context: Context) {
         const val DEFAULT_STOP_WORDS = "stop, done"
         const val DEFAULT_SEND_WORDS = "send, submit"
         const val DEFAULT_CANCEL_WORDS = "cancel, discard"
+
+        // The speaker button under a reply, and the play/pause button of the audio bar ChatGPT shows while
+        // it reads one out. Any stop button counts as pausing too, as nothing else is running then.
+        const val DEFAULT_READ_ALOUD_WORDS = "read aloud, read out loud"
+        const val DEFAULT_STOP_READING_WORDS = "pause audio, stop reading, stop speaking, stop read aloud"
+        const val DEFAULT_RESUME_READING_WORDS = "play audio, resume audio"
 
         // Spoken at the end of a dictation. Two-word phrases rarely end a sentence by accident.
         const val DEFAULT_SEND_PHRASES = "send it, send message"

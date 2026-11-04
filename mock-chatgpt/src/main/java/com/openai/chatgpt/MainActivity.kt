@@ -2,9 +2,16 @@ package com.openai.chatgpt
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +24,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import kotlin.math.log10
 import kotlin.math.sqrt
@@ -28,23 +36,70 @@ import kotlin.math.sqrt
  * "MockGPT" tag so the script can assert on what HandsFree GPT pressed.
  * A dictation takes 2 s to transcribe. Like the real app appears to (issue #1), the text box comes back,
  * its send arrow showing but disabled, before the transcript is in it.
+ * Like the real app, every paragraph of a reply is labelled with its own text. The last one mentions "stop" and
+ * "done", which must never pass for buttons.
+ * A finished reply gets a Read aloud button. As in the real app (1.2026.300), pressing it fetches the speech
+ * for a moment, then shows an audio bar at the top, [pause/play] 00:00 [seek bar] [X], and "speaks" (a real
+ * player, playing silence) for 6 s. Pausing stops the player. Once the speech ends, the bar stays, showing play
+ * with its seek bar at the end. Its X has no label (the real one says "Close"), so the tests show the app finds
+ * it by position.
  * Launch flags, remembered across launches:
  *   --ez odd true          labels the automation doesn't know (tests the position fallback)
  *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
  *   --es transcript '…'    what the next dictations transcribe to (default "Hello from dictation. Send it.")
+ *   --ei read_delay 4000   how long Read aloud takes to start speaking, in ms (default 800)
+ * To use the audio bar as a person would (target "toggle" for play/pause, "rewind" to drag the seek bar back
+ * to the start, or "close"):
+ *   adb shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target toggle
  */
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var transcript: TextView
+    private lateinit var lastParagraph: TextView
     private lateinit var input: EditText
     private lateinit var composer: LinearLayout
     private lateinit var bar: LinearLayout
     private lateinit var trailing: ImageButton
+    private lateinit var actions: LinearLayout
+    private lateinit var audioBar: LinearLayout
+    private lateinit var audioToggle: ImageButton
+    private lateinit var audioTime: TextView
+    private lateinit var audioSeek: SeekBar
+    private lateinit var audioClose: ImageButton
     private var generating = false
     private var transcribing = false
     private var ignoreSend = false
     private var dictated = DEFAULT_TRANSCRIPT
+    private var readDelay = READ_DELAY_MS
+    private var speech: AudioTrack? = null
+    private var playedMs = 0
+    private val startSpeaking = Runnable { play() }
     @Volatile private var recording = false
+
+    private val speaking = object : Runnable {
+        override fun run() {
+            playedMs = minOf(playedMs + SPEECH_TICK_MS, READ_MS)
+            showPosition()
+            if (playedMs < READ_MS) {
+                handler.postDelayed(this, SPEECH_TICK_MS.toLong())
+            } else {
+                silence()
+                Log.i(TAG, "READ ALOUD DONE")
+            }
+        }
+    }
+
+    private val userTaps = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val target = intent.getStringExtra("target")
+            Log.i(TAG, "USER taps $target")
+            when (target) {
+                "toggle" -> audioToggle.performClick()
+                "rewind" -> rewind()
+                "close" -> audioClose.performClick()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,10 +108,13 @@ class MainActivity : Activity() {
             if (intent.hasExtra(flag)) sp.edit().putBoolean(flag, intent.getBooleanExtra(flag, false)).apply()
         }
         intent.getStringExtra("transcript")?.let { sp.edit().putString("transcript", it).apply() }
+        if (intent.hasExtra("read_delay")) sp.edit().putInt("read_delay", intent.getIntExtra("read_delay", 0)).apply()
         val odd = sp.getBoolean("odd", false)
         ignoreSend = sp.getBoolean("ignore_send", false)
         dictated = sp.getString("transcript", null) ?: DEFAULT_TRANSCRIPT
+        readDelay = sp.getInt("read_delay", READ_DELAY_MS)
         transcript = TextView(this).apply { textSize = 14f; text = "Mock ChatGPT (odd labels=$odd)\n" }
+        lastParagraph = TextView(this).apply { textSize = 14f; visibility = View.GONE }
         input = EditText(this).apply {
             hint = "Ask ChatGPT"
             addTextChangedListener(object : TextWatcher {
@@ -79,6 +137,20 @@ class MainActivity : Activity() {
             button(android.R.drawable.ic_media_pause, if (odd) null else "Stop dictation") { endDictation("stop") },
             button(android.R.drawable.ic_menu_send, "Send") { endDictation("send") },
         ).apply { visibility = View.GONE }
+        // Under the latest reply: [copy] [read aloud].
+        actions = row(
+            button(android.R.drawable.ic_menu_agenda, "Copy") { Log.i(TAG, "TAP copy") },
+            button(android.R.drawable.ic_lock_silent_mode_off, "Read aloud") { onReadAloud() },
+        ).apply { visibility = View.GONE }
+        // At the top while a reply is read: [pause/play] 00:00 [seek bar] [X].
+        audioToggle = button(android.R.drawable.ic_media_pause, "Pause audio") { onAudioToggle() }
+        audioTime = TextView(this).apply { text = "00:00" }
+        audioSeek = SeekBar(this).apply {
+            max = READ_MS
+            contentDescription = "Audio playback position"
+        }
+        audioClose = button(android.R.drawable.ic_menu_close_clear_cancel, null) { onAudioClose() }
+        audioBar = row(audioToggle, audioTime, audioSeek, audioClose).apply { visibility = View.GONE }
 
         val bottom = FrameLayout(this).apply {
             addView(composer)
@@ -87,10 +159,32 @@ class MainActivity : Activity() {
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
+            addView(audioBar, LinearLayout.LayoutParams(-1, -2))
             addView(ScrollView(context).apply { addView(transcript) }, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(lastParagraph, LinearLayout.LayoutParams(-1, -2))
+            addView(actions, LinearLayout.LayoutParams(-1, -2))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
         })
         updateTrailing()
+    }
+
+    // Only the copy on screen can be tapped. HandsFree GPT opening ChatGPT starts a second copy of this
+    // activity over the one the test launched, and a tap must not reach both.
+    override fun onResume() {
+        super.onResume()
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_EXPORTED else 0
+        registerReceiver(userTaps, IntentFilter(ACTION_USER_TAP), "android.permission.DUMP", null, flags)
+    }
+
+    override fun onPause() {
+        unregisterReceiver(userTaps)
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        silence()
+        super.onDestroy()
     }
 
     private fun button(icon: Int, desc: String?, onClick: () -> Unit) = ImageButton(this).apply {
@@ -127,6 +221,7 @@ class MainActivity : Activity() {
 
     private fun startDictation() {
         Log.i(TAG, "TAP mic -> dictation started")
+        actions.visibility = View.GONE // a new turn
         composer.visibility = View.GONE
         bar.visibility = View.VISIBLE
         recording = true
@@ -169,11 +264,99 @@ class MainActivity : Activity() {
                 if (words < 30) handler.postDelayed(this, 100) else {
                     generating = false
                     updateTrailing()
+                    lastParagraph.text = LAST_PARAGRAPH
+                    lastParagraph.contentDescription = LAST_PARAGRAPH
+                    lastParagraph.visibility = View.VISIBLE
+                    actions.visibility = View.VISIBLE
                     Log.i(TAG, "REPLY DONE")
                 }
             }
         })
     }
+
+    /** Fetches the speech for a moment, then reads the reply out from the start. */
+    private fun onReadAloud() {
+        Log.i(TAG, "TAP read aloud")
+        silence()
+        playedMs = 0
+        handler.removeCallbacks(startSpeaking)
+        handler.postDelayed(startSpeaking, readDelay.toLong())
+    }
+
+    private fun onAudioToggle() {
+        if (speech != null) {
+            Log.i(TAG, "TAP pause audio")
+            silence()
+        } else {
+            Log.i(TAG, "TAP play audio")
+            play()
+        }
+    }
+
+    private fun onAudioClose() {
+        Log.i(TAG, "TAP close audio")
+        silence()
+        playedMs = 0
+        audioBar.visibility = View.GONE
+    }
+
+    /** Drags the seek bar back to the start: paused speech stays paused, playing speech plays on from there. */
+    private fun rewind() {
+        playedMs = 0
+        showPosition()
+    }
+
+    /** Speaks from where it was paused, or from the start once it has ended. */
+    private fun play() {
+        if (playedMs >= READ_MS) playedMs = 0
+        speech = silentSpeech().apply { play() }
+        audioToggle.contentDescription = "Pause audio"
+        audioToggle.setImageResource(android.R.drawable.ic_media_pause)
+        audioBar.visibility = View.VISIBLE
+        showPosition()
+        Log.i(TAG, "READING ALOUD")
+        handler.postDelayed(speaking, SPEECH_TICK_MS.toLong())
+    }
+
+    /** Stops the player: like the real app's paused speech, it no longer counts as playing. */
+    private fun silence() {
+        handler.removeCallbacks(speaking)
+        speech?.let {
+            runCatching { it.stop() }
+            it.release()
+        }
+        speech = null
+        audioToggle.contentDescription = "Play audio"
+        audioToggle.setImageResource(android.R.drawable.ic_media_play)
+    }
+
+    private fun showPosition() {
+        audioSeek.progress = playedMs
+        audioTime.text = "00:%02d".format(playedMs / 1000)
+    }
+
+    /** Stands in for the speech: silence, but from a real player, so Android reports audio playing. */
+    private fun silentSpeech() = AudioTrack.Builder()
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build(),
+        )
+        .setAudioFormat(
+            AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(8000)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .build(),
+        )
+        .setTransferMode(AudioTrack.MODE_STATIC)
+        .setBufferSizeInBytes(16000)
+        .build()
+        .apply {
+            write(ShortArray(8000), 0, 8000)
+            setLoopPoints(0, 8000, -1)
+        }
 
     @SuppressLint("MissingPermission")
     private fun record() {
@@ -198,7 +381,12 @@ class MainActivity : Activity() {
 
     private companion object {
         const val TAG = "MockGPT"
+        const val ACTION_USER_TAP = "com.openai.chatgpt.USER_TAP"
         const val TRANSCRIBE_MS = 2000L
         const val DEFAULT_TRANSCRIPT = "Hello from dictation. Send it."
+        const val LAST_PARAGRAPH = "Stop reading here if you like: that's all done."
+        const val READ_MS = 6000
+        const val SPEECH_TICK_MS = 100
+        const val READ_DELAY_MS = 800
     }
 }

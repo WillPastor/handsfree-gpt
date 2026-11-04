@@ -117,6 +117,7 @@ object MediaControls {
         }
 
         override fun onStop() {
+            Log.i(TAG, "media button: stop")
             HandsFreeService.instance?.controller?.endSession()
         }
 

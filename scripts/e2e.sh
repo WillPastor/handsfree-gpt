@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end test: drives HandsFree GPT against the mock ChatGPT (./mock-chatgpt) on an emulator
-# and checks in logcat what it pressed. Needs one running emulator; takes about three minutes.
+# and checks in logcat what it pressed. Needs one running emulator; takes about seven minutes.
 #
 #   scripts/e2e.sh                      # build, install, run every scenario
 #   ADB=/path/to/adb scripts/e2e.sh     # if adb isn't on PATH
@@ -33,22 +33,45 @@ expect_not() { if grep -qE -- "$2" "$LOG"; then bad "$1 (unexpected /$2/)"; else
 check() { if "${@:2}"; then ok "$1"; else bad "$1"; fi; }
 count() { grep -cE -- "$1" "$LOG" || true; }
 line_of() { grep -nE -- "$1" "$LOG" | head -n1 | cut -d: -f1; }
+last_line_of() { grep -nE -- "$1" "$LOG" | tail -n1 | cut -d: -f1; }
 in_order() { local a b; a="$(line_of "$1")"; b="$(line_of "$2")"; [[ -n $a && -n $b && $a -lt $b ]]; }
+after() { local a b; a="$(last_line_of "$1")"; b="$(line_of "$2")"; [[ -n $a && -n $b && $a -gt $b ]]; } # last $1 after first $2
 
 begin() { adb_ logcat -c; }
 collect() { adb_ logcat -d -s HandsFreeGPT:V MockGPT:V AndroidRuntime:E | tr -d '\r' >"$LOG"; }
 skip() { echo "  skip  $1"; skipped=$((skipped + 1)); }
 handsfree() { shell am start -a "com.handsfreegpt.action.$1" -n com.handsfreegpt/.MainActivity >/dev/null; }
+app_settings() { adb_ shell am broadcast -n com.handsfreegpt/.DebugPrefsReceiver "$@" >/dev/null; } # --ez key bool
+wait_for() { # until a log line matches $1, for at most $2 seconds
+  local i
+  for ((i = 0; i < $2; i++)); do
+    adb_ logcat -d -s HandsFreeGPT:V MockGPT:V | grep -qE -- "$1" && return 0
+    sleep 1
+  done
+  return 1
+}
 mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) button labels, then go home.
-  # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to.
+  # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to;
+  # a fourth, how long Read aloud takes to start speaking, in ms.
   shell am force-stop com.openai.chatgpt
   shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" --ez ignore_send "${2:-false}" \
-    --es transcript "'${3:-Hello from dictation. Send it.}'" >/dev/null
+    --es transcript "'${3:-Hello from dictation. Send it.}'" --ei read_delay "${4:-800}" >/dev/null
   sleep 2
   shell input keyevent KEYCODE_HOME
   sleep 1
 }
 overlay_windows() { shell dumpsys window windows | grep -c 'handsfreegpt' || true; }
+user_tap() { # use the mock's audio bar as a person would: toggle (play/pause), rewind (to the start) or close
+  adb_ shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target "$1" >/dev/null
+}
+no_voice() { grep -q 'voice commands unavailable' "$LOG"; }
+capture_now() { # capture ChatGPT's screen, as the app's Capture button does, and print the capture
+  adb_ shell am broadcast -n com.handsfreegpt/.DebugCaptureReceiver >/dev/null
+  sleep 1
+  shell run-as com.handsfreegpt cat files/last_capture.txt
+}
+has() { grep -qE -- "$1"; }    # stdin matches
+lacks() { ! grep -qE -- "$1"; } # stdin doesn't match
 
 if [[ "$(shell getprop ro.boot.qemu)" != "1" && "$(shell getprop ro.kernel.qemu)" != "1" ]]; then
   echo "Refusing to run: this installs a fake com.openai.chatgpt, so use an emulator, not a phone." >&2
@@ -205,6 +228,179 @@ else
   expect_not "doesn't remove the command a second time" 'SENT: Repeat the words$'
 fi
 handsfree STOP
+
+step "10. Read aloud: once the reply is done, presses Read aloud, then listens again when it has finished"
+mock false
+app_settings --ez read_aloud true --ez continuous true
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*READ ALOUD DONE' 45 || true
+sleep 5
+collect
+if grep -q 'voice commands unavailable' "$LOG"; then
+  skip "this emulator has no on-device speech recognition"
+else
+  expect "presses Read aloud" 'MockGPT.*TAP read aloud'
+  check "only once the reply has finished" in_order 'MockGPT.*REPLY DONE' 'MockGPT.*TAP read aloud'
+  check "then listens again" test "$(count 'MockGPT.*TAP mic')" -eq 2
+  check "but only after the reading has ended" after 'MockGPT.*TAP mic' 'MockGPT.*READ ALOUD DONE'
+  CAPTURE="$(capture_now)"
+  check "a capture shows the ended reply's audio bar: play, the X, the seek bar at its end" \
+    has 'resume="play audio".* close="".* position=1\.000$' <<<"$CAPTURE"
+  check "captures leave out chat text" lacks 'Stop reading here|word[0-9]' <<<"$CAPTURE"
+fi
+handsfree STOP
+
+step "11. Next ⏭ while a reply is being read: stops the reading and starts talking"
+mock false
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*READING ALOUD' 45 || true
+shell input keyevent KEYCODE_MEDIA_NEXT
+sleep 4
+collect
+if grep -q 'voice commands unavailable' "$LOG"; then
+  skip "this emulator has no on-device speech recognition"
+else
+  expect "stops the reading with the audio bar's X" 'MockGPT.*TAP close audio'
+  check "and starts talking" after 'MockGPT.*TAP mic' 'MockGPT.*TAP close audio'
+  expect_not "without waiting for the reading to end" 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+
+step "12. Next ⏭ while ChatGPT is still fetching the speech: stops the reading once it starts, then talks"
+mock false false "" 4000
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*TAP read aloud' 45 || true
+shell input keyevent KEYCODE_MEDIA_NEXT
+sleep 10 # the speech starts 4 s after the press and would end 6 s later
+collect
+if grep -q 'voice commands unavailable' "$LOG"; then
+  skip "this emulator has no on-device speech recognition"
+else
+  check "⏭ came before the speech started" in_order 'media button: send' 'MockGPT.*READING ALOUD'
+  check "stops the reading once it starts" in_order 'MockGPT.*READING ALOUD' 'MockGPT.*TAP close audio'
+  check "only then starts talking" after 'MockGPT.*TAP mic' 'MockGPT.*TAP close audio'
+  expect_not "doesn't let the reply play on" 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+
+step "13. Pausing a reply in ChatGPT: waits rather than taking it as the end, even back at the start, then listens once it has played on"
+mock false
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*READING ALOUD' 45 || true
+sleep 2
+user_tap toggle # pause it
+sleep 3
+CAPTURE="$(capture_now)"
+user_tap rewind # drag it back to the start
+sleep 3         # in all, far longer than the 2 s of quiet that end a reply
+AT_START="$(capture_now)"
+user_tap toggle # and play it on
+wait_for 'MockGPT.*READ ALOUD DONE' 15 || true
+sleep 5
+collect
+if no_voice; then
+  skip "this emulator has no on-device speech recognition"
+else
+  check "a capture shows it paused partway" has '\(paused partway\)' <<<"$CAPTURE"
+  check "and still paused once dragged back to the start" has 'position=0\.000 \(paused partway\)' <<<"$AT_START"
+  expect "shows the reply as paused" 'Reply paused'
+  check "doesn't listen while it's paused" test "$(count 'MockGPT.*TAP mic')" -eq 2
+  check "but does once it has played on to the end" after 'MockGPT.*TAP mic' 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+
+step "14. Play/pause while a reply is read: pauses it, then plays it on; previous ⏮ then stops it and waits"
+mock false
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*READING ALOUD' 45 || true
+sleep 1
+shell input keyevent KEYCODE_MEDIA_PLAY_PAUSE
+sleep 5
+shell input keyevent KEYCODE_MEDIA_PLAY_PAUSE
+sleep 2
+shell input keyevent KEYCODE_MEDIA_PREVIOUS
+sleep 4
+collect
+if no_voice; then
+  skip "this emulator has no on-device speech recognition"
+else
+  expect "play/pause pauses the reply" 'MockGPT.*TAP pause audio'
+  check "and plays it on when pressed again" in_order 'MockGPT.*TAP pause audio' 'MockGPT.*TAP play audio'
+  check "previous ⏮ then stops it with the X" after 'MockGPT.*TAP close audio' 'MockGPT.*TAP play audio'
+  check "and waits instead of listening" test "$(count 'MockGPT.*TAP mic')" -eq 1
+  expect_not "the reply never plays to the end" 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+
+step "15. Turning hands-free off while a reply is read pauses it, even one ChatGPT is still fetching"
+mock false
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*READING ALOUD' 45 || true
+shell input keyevent KEYCODE_MEDIA_STOP
+sleep 8
+collect
+if no_voice; then
+  skip "this emulator has no on-device speech recognition"
+else
+  expect "the stop button turns hands-free off" 'media button: stop'
+  expect "and pauses the reply" 'MockGPT.*TAP pause audio'
+  expect_not "rather than letting it play on" 'MockGPT.*READ ALOUD DONE'
+fi
+mock false false "" 4000
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*TAP read aloud' 45 || true
+shell input keyevent KEYCODE_MEDIA_STOP
+sleep 10 # the speech starts 4 s after the press and would end 6 s later
+collect
+if no_voice; then
+  skip "this emulator has no on-device speech recognition"
+else
+  check "hands-free went off before the speech started" in_order 'media button: stop' 'MockGPT.*READING ALOUD'
+  check "pauses the reply once it starts" in_order 'MockGPT.*READING ALOUD' 'MockGPT.*TAP pause audio'
+  expect_not "rather than letting it play on" 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+app_settings --ez read_aloud false --ez continuous false
+
+step "16. Leaving ChatGPT while a reply is read: keeps waiting for it, a tap brings ChatGPT back, and it listens once the reply has ended"
+mock false
+app_settings --ez read_aloud true --ez continuous true
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*READING ALOUD' 45 || true
+shell input keyevent KEYCODE_HOME # the reply plays on, out of sight
+sleep 2
+tap_pill
+wait_for 'MockGPT.*READ ALOUD DONE' 10 || true
+sleep 5
+collect
+if no_voice; then
+  skip "this emulator has no on-device speech recognition"
+else
+  expect "keeps waiting for the reply while ChatGPT is off screen" 'READING: .*Open ChatGPT to continue'
+  expect_not "rather than giving up on it" 'left the screen'
+  check "a tap brings ChatGPT back, and the pill shows the reply again" \
+    after 'READING: .*Reading the reply' 'READING: .*Open ChatGPT to continue'
+  expect_not "without pausing or closing the reply" 'MockGPT.*TAP (pause|close) audio'
+  check "listens again only once the reply has ended" after 'MockGPT.*TAP mic' 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+app_settings --ez read_aloud false --ez continuous false
 
 step "Stability"
 check "no crashes" test "$(adb_ logcat -d -b crash | grep -c 'com.handsfreegpt' || true)" -eq 0

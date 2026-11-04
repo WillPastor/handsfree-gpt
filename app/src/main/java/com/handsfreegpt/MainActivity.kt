@@ -129,6 +129,12 @@ class MainActivity : Activity() {
             "Continuous conversation: send, wait for the reply, then listen again (experimental)",
             prefs.continuous,
         ) { prefs.continuous = it }
+        col += switch("Read replies aloud", prefs.readAloud) { prefs.readAloud = it }
+        col += hint(
+            "Presses ChatGPT's own Read aloud button when a reply finishes, and waits for it before listening " +
+                "again. Play/pause or a tap on the pill pauses and resumes it, next ⏭ skips the rest and starts " +
+                "talking, and previous ⏮ stops it. If you pause it in ChatGPT, the app waits until you play it on.",
+        )
         col += switch("Start listening whenever ChatGPT opens", prefs.autoListenOnOpen) { prefs.autoListenOnOpen = it }
         col += switch("Beep when listening starts and stops", prefs.beeps) { prefs.beeps = it }
 
@@ -164,7 +170,8 @@ class MainActivity : Activity() {
         col += header("Car & headset buttons")
         col += switch("Steering-wheel and headset buttons", prefs.carButtons) { prefs.carButtons = it }
         col += hint(
-            "Play/Pause: talk ↔ finish · Next ⏭: send · Previous ⏮: cancel · Stop: hands-free off. " +
+            "Play/Pause: talk ↔ finish · Next ⏭: send, or skip a reply being read · Previous ⏮: cancel · " +
+                "Stop: hands-free off. " +
                 "Your music pauses while hands-free is on, so the buttons reach this app.",
         )
         col += hint(
@@ -199,6 +206,9 @@ class MainActivity : Activity() {
         col += words("Stop dictation (■)", prefs.stopWords) { prefs.stopWords = it }
         col += words("Send (↑)", prefs.sendWords) { prefs.sendWords = it }
         col += words("Cancel dictation (X)", prefs.cancelWords) { prefs.cancelWords = it }
+        col += words("Read aloud (under a reply)", prefs.readAloudWords) { prefs.readAloudWords = it }
+        col += words("Pause reading (while ChatGPT speaks)", prefs.stopReadingWords) { prefs.stopReadingWords = it }
+        col += words("Play reading (while it's paused)", prefs.resumeReadingWords) { prefs.resumeReadingWords = it }
         col += button("Reset to defaults") {
             prefs.resetButtonWords()
             recreate()

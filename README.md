@@ -33,10 +33,10 @@ happens first:
   media screen.
 - **You stop talking** (optional silence detection).
 
-> **Status: v0.2.1.** Dictation and the "send it" voice command work with the live ChatGPT app (1.2026.300) on a
-> Samsung Galaxy S26 Ultra running Android 16. The steering-wheel buttons and Android Auto haven't been tried in
-> a car yet. Every change is also tested end to end on an emulator against a mock ChatGPT.
-> See [Limitations](#limitations).
+> **Status: v0.3.0.** Works with the live ChatGPT app on a Samsung Galaxy S26 Ultra running Android 16: dictation
+> and the "send it" voice command since v0.2.1, and reading replies aloud since v0.3.0. The steering-wheel buttons
+> and Android Auto haven't been tried in a car yet. Every change is also tested end to end on an emulator against
+> a mock ChatGPT. See [Limitations](#limitations).
 
 ## Demo
 
@@ -67,6 +67,9 @@ tests. The live words come from Android's on-device recogniser hearing a synthes
   or any routine app via an intent.
 - **Auto-send** and an experimental **continuous conversation** mode that sends, waits for the reply, then
   listens again.
+- **Replies read aloud.** When a reply finishes, the app presses ChatGPT's own Read aloud button and waits for it
+  to finish before listening again. It never reads your chats itself. Play/pause pauses a reply, and next ⏭
+  skips the rest. If you pause it in ChatGPT, the app waits for you, and turning hands-free off pauses it too.
 - **Floating status pill** that shows the words as they're heard. Tap it to talk or stop, hold it to exit,
   drag to move it. It keeps the screen on.
 - **Robust button finding.** Buttons are matched by accessibility label, with button position as a fallback.
@@ -128,6 +131,9 @@ Voice commands need Android 13+.
 | Send | "…send it" | Next ⏭ | Stop talking (with auto-send on) |
 | Stop and keep the text | "…stop dictation" | Play/Pause | Stop talking, or tap the pill |
 | Cancel | "…cancel that" | Previous ⏮ | Say nothing for 12 s |
+| Pause or resume a reply being read aloud | | Play/Pause | Tap the pill, or use ChatGPT's own button |
+| Skip a reply being read aloud, and talk | | Next ⏭ | |
+| Stop a reply being read aloud, and wait | | Previous ⏮ | |
 | Turn hands-free off | | Stop | Hold the pill, or tap the tile |
 
 The settings cover:
@@ -151,7 +157,7 @@ scripts/e2e.sh                       # end-to-end, on a running emulator (~2 min
 | Layer | What it checks |
 |---|---|
 | **Unit** (17 tests) | [`SpeechTrackerTest`](app/src/test/java/com/handsfreegpt/SpeechTrackerTest.kt) runs silence detection on synthetic audio: road noise, pauses, rising noise, timeouts. [`VoiceCommandsTest`](app/src/test/java/com/handsfreegpt/VoiceCommandsTest.kt) checks that commands fire only at the end and how the command is stripped from the text |
-| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh), 29 checks) | Runs on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double that holds the mic and takes time to transcribe, like the real app. Covers: start, auto-cancel, tap to stop, the position fallback, long-press exit, the tile, **media buttons**, a **spoken "…send it"** replayed into Android's on-device recogniser, which must send the message without the command (even when the message itself ends in "send it"), and a send that doesn't go through, which must not be reported as sent |
+| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh), 63 checks) | Runs on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double that holds the mic, takes time to transcribe and can read replies aloud, like the real app. Covers: start, auto-cancel, tap to stop, the position fallback, long-press exit, the tile, **media buttons**, a **spoken "…send it"** replayed into Android's on-device recogniser, which must send the message without the command (even when the message itself ends in "send it"), a send that doesn't go through, which must not be reported as sent, and **reading replies aloud**: pausing a reply in ChatGPT or with play/pause, stopping or skipping it, even before ChatGPT starts speaking, and turning hands-free off or switching apps mid-reply. Replies mention "stop" and "done", which must never pass for buttons, and captures must leave out chat text |
 | **CI** ([GitHub Actions](.github/workflows/ci.yml)) | Lint, unit tests and both APKs on every push |
 
 ## Project structure
@@ -183,12 +189,12 @@ docs/                      architecture notes and images
 
 Each planned feature has its own [issue](../../issues) with the details.
 
-- [ ] Read replies aloud, then listen again, for a complete in-car loop ([#3](../../issues/3))
 - [ ] A wake phrase to *start* talking without a button ([#4](../../issues/4))
 - [ ] Translate the app ([#5](../../issues/5))
 - [ ] Prepare for a Google Play release ([#6](../../issues/6))
 - [ ] A new name without "GPT" ([#7](../../issues/7))
 - [ ] Try the steering-wheel buttons and Android Auto in a car ([#9](../../issues/9))
+- [x] ~~Read replies aloud~~: shipped in v0.3.0 and checked on a real phone ([#3](../../issues/3))
 - [x] ~~Verify against the live ChatGPT app~~: dictation and "send it" checked on a real phone for v0.2.1
 - [x] ~~Android Auto controller~~: shipped in v0.2.0 as a media source with Talk / Send / Cancel
 - [x] ~~Steering-wheel media buttons~~: shipped in v0.2.0

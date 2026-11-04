@@ -20,7 +20,8 @@ import android.util.Log
  *   LISTENING  → until you stop talking, say a command ("send it"), or press a car/headset button
  *   STOPPING   → press ■ (or ↑) and wait for the bar to go away
  *   FINISHING  → wait for the transcript to land in the text box, remove a spoken command, send, check it went
- *   WAIT_REPLY → (continuous) wait for the reply, then listen again
+ *   WAIT_REPLY → (continuous or read aloud) wait for the reply to finish
+ *   READING    → (read aloud) press ChatGPT's Read aloud, wait until it stops speaking, then listen again
  *   READY      → paused; tap the floating pill or press play to talk again
  *
  * Everything runs on the main thread, driven by a 250 ms tick while a session is active.
@@ -32,7 +33,7 @@ class DictationController(
     private val prefs: Prefs,
 ) : SpeechEndDetector.Listener {
 
-    enum class State { OFF, READY, WAIT_IDLE, STARTING, LISTENING, STOPPING, FINISHING, WAIT_REPLY }
+    enum class State { OFF, READY, WAIT_IDLE, STARTING, LISTENING, STOPPING, FINISHING, WAIT_REPLY, READING }
 
     private val ui = ChatGptUi(service, prefs)
     private val handler = Handler(Looper.getMainLooper())
@@ -60,6 +61,14 @@ class DictationController(
     private var stripTries = 0
     private var sendTries = 0
     private var sentAt = 0L // when we last pressed send; it only counts once ChatGPT has taken the message
+    private var readPressedAt = 0L // when we pressed Read aloud
+    private var readBasePlayers = 0 // audio players already active then
+    private var readStarted = false
+    private var readRetried = false
+    private var quietSince = 0L // when ChatGPT stopped speaking; reading counts as done once it stays quiet
+    private var stopAfterRead: State? = null // stopped before the speech began: stop it once it does, then go here
+    private var pausePressedAt = 0L // we paused the reply, so ChatGPT's play button means paused, not ended
+    private var readPaused = false // the pill says the reply is paused
     private var sawGenerating = false
     private var lastBusyAt = 0L
     private var fallbackStopAt = 0L // non-zero when silence detection is unavailable
@@ -77,6 +86,7 @@ class DictationController(
 
     fun startSession(listenNow: Boolean = true) {
         if (state == State.OFF) {
+            handler.removeCallbacks(pauseOnceItSpeaks)
             overlay.show()
             service.setWatchContent(true)
             if (prefs.carButtons) MediaControls.engage(service)
@@ -91,6 +101,11 @@ class DictationController(
         if (state == State.OFF) return
         // Don't leave ChatGPT recording: stop (keeps the text in the box, never sends).
         if (state == State.LISTENING) ui.snapshot()?.takeIf { it.dictating }?.stop?.let(ui::click)
+        // Nor reading a reply out to nobody: pause it, so it can be played on from ChatGPT. One still being
+        // fetched is paused once it starts (Codex review of #12). With ChatGPT off screen, its pause button is
+        // out of reach, so the reply plays on.
+        val stillFetching = state == State.READING && readPressedAt > 0 && !readStarted
+        if (state == State.READING && !pauseReading() && stillFetching) handler.post(pauseOnceItSpeaks)
         stopListening()
         handler.removeCallbacks(tick)
         overlay.hide()
@@ -104,7 +119,21 @@ class DictationController(
         refreshTile()
     }
 
-    /** One button that does the obvious thing: talk, finish talking, or stop waiting. */
+    /** After hands-free is turned off: pauses a reply that was still being fetched, once it starts speaking. */
+    private val pauseOnceItSpeaks = object : Runnable {
+        override fun run() {
+            if (state != State.OFF) return // hands-free is back on and deals with the reply itself
+            // Only the audio bar's own button: a "stop" elsewhere could be a dictation started since.
+            val bar = ui.readAloud()?.takeIf { it.barShown }
+            if (bar?.stop != null) {
+                ui.click(bar.stop)
+            } else if (SystemClock.elapsedRealtime() - readPressedAt < READ_START_MS) {
+                handler.postDelayed(this, TICK_MS)
+            }
+        }
+    }
+
+    /** One button that does the obvious thing: talk, finish talking, stop waiting, or pause a reply being read. */
     fun toggleListening() {
         when (state) {
             State.OFF -> startSession(listenNow = true)
@@ -119,23 +148,28 @@ class DictationController(
                 pendingStrip = null
                 go(State.READY)
             }
+            State.READING -> toggleReading()
             State.STOPPING -> Unit
         }
     }
 
-    /** Finish and send (e.g. the ⏭ button). When paused with text in the box, sends that. */
+    /**
+     * Finish and send (e.g. the ⏭ button). When paused with text in the box, sends that. While a reply
+     * is being read aloud, skips the rest of it and starts talking.
+     */
     fun sendNow() {
         when (state) {
             State.LISTENING -> finishDictation(send = true)
             State.READY -> ui.snapshot()?.takeIf { it.idle }?.send?.let {
                 ui.click(it)
-                if (prefs.continuous) go(State.WAIT_REPLY) else show("✅ Sent · tap to talk", GREY)
+                if (prefs.waitsForReply) go(State.WAIT_REPLY) else show("✅ Sent · tap to talk", GREY)
             }
+            State.READING -> stopReadingThen(State.WAIT_IDLE)
             else -> Unit
         }
     }
 
-    /** Throw away the current dictation (e.g. the ⏮ button), or stop waiting. */
+    /** Throw away the current dictation (e.g. the ⏮ button), or stop waiting or reading aloud. */
     fun cancelNow() {
         when (state) {
             State.LISTENING -> cancelDictation()
@@ -144,6 +178,7 @@ class DictationController(
                 pendingStrip = null
                 go(State.READY)
             }
+            State.READING -> stopReadingThen(State.READY)
             else -> Unit
         }
     }
@@ -168,6 +203,7 @@ class DictationController(
 
     fun shutdown() {
         endSession()
+        handler.removeCallbacks(pauseOnceItSpeaks)
         tones?.release()
         tones = null
     }
@@ -185,6 +221,14 @@ class DictationController(
         stripTries = 0
         sendTries = 0
         sentAt = 0
+        readPressedAt = 0
+        readBasePlayers = 0
+        readStarted = false
+        readRetried = false
+        quietSince = 0
+        stopAfterRead = null
+        pausePressedAt = 0
+        readPaused = false
         when (next) {
             State.READY -> show("🎙 Tap to talk · hold to exit", GREY)
             State.WAIT_IDLE -> {
@@ -199,6 +243,7 @@ class DictationController(
                 lastBusyAt = stateSince
                 show("💬 Waiting for reply…", GREY)
             }
+            State.READING -> show(READING_STATUS, GREY)
             State.OFF -> Unit
         }
         schedule()
@@ -220,8 +265,11 @@ class DictationController(
         val s = ui.snapshot()
         if (s == null) {
             when (state) {
-                State.WAIT_IDLE, State.WAIT_REPLY -> {
+                // A reply being read may still be playing, so keep track of it until ChatGPT is back (Codex
+                // review of #12).
+                State.WAIT_IDLE, State.WAIT_REPLY, State.READING -> {
                     stateSince = now
+                    missingTicks++
                     show("📱 Open ChatGPT to continue", GREY)
                 }
                 else -> if (++missingTicks >= 4) {
@@ -231,6 +279,10 @@ class DictationController(
                 }
             }
             return
+        }
+        // Back on screen while a reply is read: the pill shows the reply again, rather than "Open ChatGPT".
+        if (missingTicks > 0 && state == State.READING && stopAfterRead == null) {
+            show(if (readPaused) READING_PAUSED_STATUS else READING_STATUS, GREY)
         }
         missingTicks = 0
 
@@ -307,14 +359,160 @@ class DictationController(
                         (now - lastBusyAt > 6000 && inState > 20000)
                     )
                 if (replyDone) {
-                    attempts = 0
-                    go(State.WAIT_IDLE)
+                    when {
+                        prefs.readAloud -> go(State.READING)
+                        prefs.continuous -> {
+                            attempts = 0
+                            go(State.WAIT_IDLE)
+                        }
+                        else -> go(State.READY)
+                    }
                 }
             }
+
+            State.READING -> readReply(now, inState)
 
             State.OFF, State.READY -> Unit
         }
     }
+
+    /**
+     * After a reply: press ChatGPT's own Read aloud, then wait until it has finished speaking (issue #3).
+     * The reply text itself is never read. ChatGPT counts as speaking while its pause button shows, or while
+     * more audio players are active than when we pressed the button. A paused reply isn't finished, even
+     * though it's quiet: the app waits until it plays on, or its bar is closed.
+     */
+    private fun readReply(now: Long, inState: Long) {
+        stopAfterRead?.let { next ->
+            val r = ui.readAloud()
+            val started = r != null && (r.stop != null || players() > readBasePlayers)
+            // Once it starts, stop it. Give up if it never does, or can't be stopped.
+            if ((started && stopReading()) || now - readPressedAt >= READ_START_MS) leaveReading(next)
+            return
+        }
+        val r = ui.readAloud() ?: return
+        if (readPressedAt == 0L) {
+            when {
+                r.read != null -> {
+                    readBasePlayers = players() // already playing (our silence, navigation…), so not ChatGPT
+                    ui.click(r.read)
+                    readPressedAt = now
+                }
+                inState > READ_FIND_MS -> {
+                    capture("read aloud button not found")
+                    fail("Can't find ChatGPT's Read aloud button")
+                }
+            }
+            return
+        }
+        val speaking = r.stop != null || players() > readBasePlayers
+        // ChatGPT shows play both while paused and once the reply has ended. Its seek bar tells them apart,
+        // and so does our own pause, until it speaks again (allowing a moment for the press to take).
+        if (speaking && (readPaused || now - pausePressedAt > PAUSE_TAKES_MS)) pausePressedAt = 0
+        val paused = !speaking && r.resume != null && (pausePressedAt > 0 || r.pausedPartway)
+        when {
+            !readStarted -> when {
+                speaking -> readStarted = true
+                now - readPressedAt < READ_START_MS -> Unit
+                !readRetried && r.read != null -> {
+                    readRetried = true // our press may have been missed
+                    ui.click(r.read)
+                    readPressedAt = now
+                }
+                else -> {
+                    capture("read aloud didn't start")
+                    fail("Read aloud didn't start")
+                }
+            }
+            paused -> {
+                quietSince = 0
+                if (!readPaused) show(READING_PAUSED_STATUS, GREY)
+                readPaused = true
+            }
+            // Played on. The time limit is for speaking, so it starts again, however long the pause was.
+            speaking && readPaused -> {
+                quietSince = 0
+                stateSince = now
+                show(READING_STATUS, GREY)
+                readPaused = false
+            }
+            speaking && inState < READ_MAX_MS -> quietSince = 0
+            quietSince == 0L -> quietSince = now
+            // Wait out short pauses between sentences before calling it done.
+            now - quietSince >= READ_DONE_QUIET_MS -> afterReading()
+        }
+    }
+
+    /**
+     * Play/pause, or a tap on the pill, while a reply is read: pauses it, or plays it on if it's paused. Before
+     * it starts speaking there's nothing to pause yet, so this stops it once it does, and waits. With ChatGPT
+     * off screen its buttons are out of reach, so this brings it back, and the next press pauses.
+     */
+    private fun toggleReading() {
+        val r = ui.readAloud()
+        when {
+            r == null -> showChatGpt()
+            !readStarted -> stopReadingThen(State.READY)
+            r.stop != null -> {
+                ui.click(r.stop)
+                pausePressedAt = SystemClock.elapsedRealtime()
+            }
+            r.resume != null && (pausePressedAt > 0 || r.pausedPartway) -> ui.click(r.resume)
+            else -> stopReadingThen(State.READY) // nothing to pause
+        }
+    }
+
+    private fun afterReading() {
+        if (prefs.continuous) {
+            attempts = 0
+            go(State.WAIT_IDLE)
+        } else {
+            go(State.READY)
+        }
+    }
+
+    /**
+     * Stops reading aloud, then goes to [next]. Just after the press, ChatGPT is still fetching the speech
+     * and there's nothing to stop yet, and any audio bar showing is the previous reply's. Moving on then
+     * would let the speech start over whatever comes next, so this stays in READING until it starts and
+     * stops it then (see [readReply]). With ChatGPT off screen its audio bar is out of reach, so this brings
+     * it back, and the next press stops the reply.
+     */
+    private fun stopReadingThen(next: State) {
+        when {
+            readPressedAt > 0 && ui.root() == null -> showChatGpt()
+            readPressedAt > 0 && !readStarted -> {
+                stopAfterRead = next
+                show("⏹ Stopping the reply…", GREY)
+            }
+            else -> {
+                stopReading()
+                leaveReading(next)
+            }
+        }
+    }
+
+    private fun leaveReading(next: State) {
+        if (next == State.WAIT_IDLE) attempts = 0
+        go(next)
+    }
+
+    /** Stops ChatGPT reading aloud with its audio bar's X, or pauses it if there's no X. False if there was nothing to stop. */
+    private fun stopReading(): Boolean {
+        val r = ui.readAloud() ?: return false
+        ui.click(r.close ?: r.stop ?: return false)
+        return true
+    }
+
+    /** Pauses ChatGPT reading aloud. False if it isn't speaking, or has no button we recognise. */
+    private fun pauseReading(): Boolean {
+        val pause = ui.readAloud()?.stop ?: return false
+        ui.click(pause)
+        return true
+    }
+
+    /** Audio players active right now, whoever they belong to: Android doesn't tell other apps. */
+    private fun players() = service.getSystemService(AudioManager::class.java).activePlaybackConfigurations.size
 
     /**
      * After ■: wait for the transcript to land in the text box, strip a spoken command, send, then check
@@ -390,7 +588,7 @@ class DictationController(
     /** ChatGPT has taken the message once the text box empties or a reply starts. If not, press send once more. */
     private fun confirmSent(s: Snapshot, boxEmpty: Boolean, send: Btn?, now: Long) {
         when {
-            s.generating || boxEmpty -> if (prefs.continuous) {
+            s.generating || boxEmpty -> if (prefs.waitsForReply) {
                 go(State.WAIT_REPLY)
             } else {
                 go(State.READY)
@@ -489,6 +687,7 @@ class DictationController(
         when {
             pendingStrip != null || pendingSend -> go(State.FINISHING)
             prefs.continuous -> go(State.WAIT_REPLY)
+            sending && prefs.readAloud -> go(State.WAIT_REPLY)
             sending -> {
                 go(State.READY)
                 show("✅ Sent · tap to talk", GREY)
@@ -583,6 +782,13 @@ class DictationController(
         const val REPLY_QUIET_MS = 1500L
         const val FINISH_TIMEOUT_MS = 20_000L // a long dictation can take ChatGPT a while to transcribe
         const val SEND_CONFIRM_MS = 3000L
+        const val READ_FIND_MS = 5000L
+        const val READ_START_MS = 8000L // ChatGPT fetches the speech before it starts
+        const val READ_DONE_QUIET_MS = 2000L
+        const val READ_MAX_MS = 10 * 60_000L
+        const val READING_STATUS = "🔊 Reading the reply · tap to pause"
+        const val READING_PAUSED_STATUS = "⏸ Reply paused · tap to resume"
+        const val PAUSE_TAKES_MS = 1000L
         const val COMMAND_GRACE_MS = 1200L
         val WHITESPACE = Regex("\\s+")
         const val GREY = 0xE0303134.toInt()

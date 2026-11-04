@@ -56,19 +56,26 @@ stateDiagram-v2
     STOPPING --> FINISHING: a command to remove or a send pending
     STOPPING --> READY: dictation bar gone
     FINISHING --> READY: command removed, message sent
-    FINISHING --> WAIT_REPLY: sent (continuous mode)
-    WAIT_REPLY --> WAIT_IDLE: reply finished
+    FINISHING --> WAIT_REPLY: sent (continuous or read aloud)
+    WAIT_REPLY --> WAIT_IDLE: reply finished (continuous)
+    WAIT_REPLY --> READING: reply finished (read aloud), press Read aloud
+    READING --> WAIT_IDLE: done speaking (continuous), or next button
+    READING --> READY: done speaking, or previous button
     READY --> WAIT_IDLE: tap the pill or press play
     READY --> [*]: hold the pill, tile, or Stop
 ```
 
 When a button can't be found or a step times out, the app saves a UI capture, shows the problem in amber on
-the pill, and goes back to `READY`.
+the pill, and goes back to `READY`. A capture starts with what the app detected, read-aloud controls included,
+then lists ChatGPT's accessibility tree. Layout wrappers with nothing of their own are left out, so a capture
+fits in a message. Chat text and the text box show only their length.
 
 ## Reading ChatGPT's screen
 
-- **Only the lower 60% of the window** is searched. The composer lives there, even with the keyboard up, so a
-  word like "stop" or "send" inside a chat message is never mistaken for a button.
+- **Only the lower 60% of the window** is searched, because the composer lives there, even with the keyboard up.
+- **Chat text is never a button.** ChatGPT labels each paragraph of a reply with its own text, so a reply saying
+  "done" near the bottom of the screen would otherwise pass for a stop button, and the app would wait for it
+  forever. Text that can't be clicked is skipped. The mock's replies end with such a paragraph.
 - **Every label gets one role**, checked in priority order: cancel → stop → send → voice mode → mic. That way
   "Stop dictation" can never be read as the mic.
 - **State comes from which buttons are present:**
@@ -160,18 +167,58 @@ HandsFree GPT was listening alongside it.
   - **No resume controls.** System UI's "resume playback" connection is refused, because there's nothing to
     resume.
 
-### Knowing when a reply has finished (continuous mode)
+### Knowing when a reply has finished (continuous mode and read aloud)
 
 While a reply streams, ChatGPT shows a stop button next to the mic (*generating*). The controller waits until
 the composer is idle again **and** the window content hasn't changed for 1.5 s, because streaming text changes
-it constantly. Then it starts the next dictation.
+it constantly. Then it reads the reply aloud, starts the next dictation, or both.
+
+### Reading replies aloud
+
+`READING` presses ChatGPT's **own** Read aloud button, so the app never reads, copies or speaks the reply text
+itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
+- **Finding the button.** Replies can sit anywhere on screen, so this one search covers the whole window and
+  takes the lowest match: the latest reply. Labels are matched like every other button, and are editable.
+- **ChatGPT's audio bar.** Once Read aloud is pressed, ChatGPT shows a bar at the top of the screen:
+  `[pause/play] 00:04 [seek bar] [X]`. Its button says "Pause audio" while the reply plays and "Play audio"
+  otherwise. The X, labelled "Close", is found by position rather than by its label, so it works in any
+  language: it's the last button after the seek bar, within the same bar. Nothing counts as a bar unless it has
+  a seek bar, so a stray "stop" elsewhere can't be taken for one.
+- **Knowing when it's speaking**, without the text, from two signals:
+  - The bar's pause button is showing. Any plain "stop" counts too, because nothing else can be stopped then.
+  - More audio is playing than when the button was pressed. Android won't say whose audio it is, so the app
+    counts players with `getActivePlaybackConfigurations()`. Anything already playing then, such as the app's
+    own silent track or navigation, doesn't count as ChatGPT.
+- **Paused or finished.** After a reply ends, the bar stays, showing play, exactly as it does when paused, and
+  a paused reply stops counting as a player. The seek bar tells them apart: an ended reply leaves it at the
+  very end, so anywhere short of that means paused, even back at the start. The app reads its position from
+  the accessibility tree. A reply the app paused itself counts as paused until it speaks again. While paused,
+  the app waits, however long, and the pill says so. Found in phone testing, where pausing a reply in ChatGPT
+  started the next dictation.
+- **Done** once both signals have been quiet for 2 s and it isn't paused, which rides out pauses between
+  sentences. Then it listens again (continuous mode) or pauses.
+- **Controls while it speaks.** Play/pause or the pill pause it and play it on. Next ⏭ stops it with the bar's X
+  and starts a dictation. Previous ⏮ stops it and waits. If there's no X, they pause it instead.
+- **Turning hands-free off** pauses the reply, so it can be played on from ChatGPT. One still being fetched is
+  paused as soon as it starts, if that's within 8 s of the press. Found by an
+  [automated Codex review of #12](https://github.com/WillPastor/handsfree-gpt/pull/12).
+- **ChatGPT off screen.** The reply may play on while you're in another app, so the app keeps track of it and
+  waits for ChatGPT to come back, saying so on the pill. ChatGPT's buttons are out of reach meanwhile, so a
+  control brings ChatGPT back, and the next press acts on the reply. Turning hands-free off can't pause it
+  then. Also found by the Codex review of #12.
+- **Stopping before it speaks.** ChatGPT fetches the speech for a moment after the press, with nothing to stop
+  yet, and any bar showing is still the previous reply's. A control pressed then waits until the speech starts
+  and stops it at once, so it can't play over the next dictation. If the speech never starts within 8 s of the
+  press, the app moves on. Also found by the Codex review of #12.
+- **Failures.** If the button can't be found within 5 s, or the reading doesn't start within 8 s even after a
+  second press, the app saves a capture and says so in amber.
 
 ## Testing
 
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (29 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (63 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -189,9 +236,17 @@ it constantly. Then it starts the next dictation.
   a fake reply.
 - Transcribing takes it 2 s. As the real app appears to, it brings its text box back first, with the send arrow
   showing but disabled.
+- Each reply ends with a paragraph labelled with its own text, as ChatGPT labels them, which mentions "stop"
+  and "done".
+- A finished reply gets a Read aloud button. After 0.8 s fetching the speech, which a test can lengthen, it
+  shows ChatGPT's audio bar and "speaks" for 6 s as a real audio player playing silence. As in the real app,
+  pausing stops the player, and the bar stays after the end, showing play with its seek bar at the end. A test
+  can tap the bar, or drag its seek bar back to the start, as a person would.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
   makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations
   transcribe to can be set too.
+- Debug builds have receivers, restricted to adb, that switch settings and take captures, so scenarios can turn
+  on continuous mode and read aloud, and check what a capture shows.
 
 ## Design choices
 
