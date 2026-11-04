@@ -491,6 +491,32 @@ fi
 handsfree STOP
 app_settings --ez read_aloud false --ez continuous false
 
+step "21. Turning hands-free off and straight back on while a reply is fetched: still pauses it once it starts, rather than letting it play over the new dictation (#18)"
+mock false false "$SAID" 4000
+app_settings --ez read_aloud true --ez continuous true
+begin
+adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
+handsfree START
+wait_for 'MockGPT.*TAP read aloud' 45 || true
+shell input keyevent KEYCODE_MEDIA_STOP
+sleep 1
+handsfree START
+sleep 10 # the speech starts 4 s after the press and would end 6 s later
+collect
+if no_voice; then
+  skip "this emulator has no on-device speech recognition"
+else
+  stop_at="$(line_of 'media button: stop' || true)"
+  back_on="$(last_line_of 'WAIT_IDLE: .*Getting ready' || true)"
+  speech_at="$(line_of 'MockGPT.*READING ALOUD' || true)"
+  check "hands-free went off, then back on, before the speech started" \
+    test "${stop_at:-0}" -gt 0 -a "${back_on:-0}" -gt "${stop_at:-0}" -a "${speech_at:-0}" -gt "${back_on:-0}"
+  check "pauses the reply once it starts" in_order 'MockGPT.*READING ALOUD' 'MockGPT.*TAP pause audio'
+  expect_not "rather than letting it play over the new dictation" 'MockGPT.*READ ALOUD DONE'
+fi
+handsfree STOP
+app_settings --ez read_aloud false --ez continuous false
+
 step "Stability"
 check "no crashes" test "$(adb_ logcat -d -b crash | grep -c 'com.handsfreegpt' || true)" -eq 0
 

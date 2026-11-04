@@ -177,21 +177,23 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
         val resumeW = Prefs.words(prefs.resumeReadingWords)
         fun isStop(l: String) = stopW.any { it in l } || l == "stop" || l.startsWith("stop ")
         var read: Btn? = null
-        var stop: Btn? = null
+        val stops = mutableListOf<Btn>()
         var resume: Btn? = null
         for (b in buttons.sortedByDescending { it.rect.centerY() }) {
             when {
                 b.label.isEmpty() -> Unit
-                isStop(b.label) -> if (stop == null) stop = b
+                isStop(b.label) -> stops += b
                 resumeW.any { it in b.label } -> if (resume == null) resume = b
                 readW.any { it in b.label } -> if (read == null) read = b
             }
         }
-        // Press the bar's own button rather than its label, which sits too deep inside it to click.
-        val stopBar = stop?.let(::audioBar)
+        // Press the bar's own button rather than its label, which sits too deep inside it to click. Once there's a
+        // bar, only its own button counts: another "stop", such as a dictation's ■, can't stop the reply (#18).
+        val stopBar = stops.firstNotNullOfOrNull(::audioBar)
         val resumeBar = if (stopBar == null) resume?.let(::audioBar) else null
         val bar = stopBar ?: resumeBar
-        return ReadAloud(read, stopBar?.toggle ?: stop, resumeBar?.toggle ?: resume, bar?.close, bar?.position)
+        val stop = if (bar != null) stopBar?.toggle else stops.firstOrNull()
+        return ReadAloud(read, stop, resumeBar?.toggle ?: resume, bar?.close, bar?.position)
     }
 
     private class AudioBar(val toggle: Btn, val close: Btn?, val position: Float?)

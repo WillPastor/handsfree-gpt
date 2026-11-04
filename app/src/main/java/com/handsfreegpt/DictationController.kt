@@ -72,6 +72,7 @@ class DictationController(
     private var stopAfterRead: State? = null // stopped before the speech began: stop it once it does, then go here
     private var pausePressedAt = 0L // we paused the reply, so ChatGPT's play button means paused, not ended
     private var readPaused = false // the pill says the reply is paused
+    private var fetchPauseUntil = 0L // hands-free went off as a reply was fetched: pause it if it starts by then
     private var sawGenerating = false
     private var lastBusyAt = 0L
     private var fallbackStopAt = 0L // non-zero when silence detection is unavailable
@@ -89,7 +90,6 @@ class DictationController(
 
     fun startSession(listenNow: Boolean = true) {
         if (state == State.OFF) {
-            handler.removeCallbacks(pauseOnceItSpeaks)
             overlay.show()
             service.setWatchContent(true)
             if (prefs.carButtons) MediaControls.engage(service)
@@ -108,7 +108,11 @@ class DictationController(
         // fetched is paused once it starts (Codex review of #12). With ChatGPT off screen, its pause button is
         // out of reach, so the reply plays on.
         val stillFetching = state == State.READING && readPressedAt > 0 && !readStarted
-        if (state == State.READING && !pauseReading() && stillFetching) handler.post(pauseOnceItSpeaks)
+        if (state == State.READING && !pauseReading() && stillFetching) {
+            fetchPauseUntil = readPressedAt + READ_START_MS
+            handler.removeCallbacks(pauseOnceItSpeaks)
+            handler.post(pauseOnceItSpeaks)
+        }
         stopListening()
         handler.removeCallbacks(tick)
         overlay.hide()
@@ -122,15 +126,18 @@ class DictationController(
         refreshTile()
     }
 
-    /** After hands-free is turned off: pauses a reply that was still being fetched, once it starts speaking. */
+    /**
+     * After hands-free is turned off: pauses a reply that was still being fetched, once it starts speaking. It
+     * keeps watching if hands-free is turned back on meanwhile, because the new session knows nothing of that
+     * reply, which would otherwise start over its dictation (#18).
+     */
     private val pauseOnceItSpeaks = object : Runnable {
         override fun run() {
-            if (state != State.OFF) return // hands-free is back on and deals with the reply itself
             // Only the audio bar's own button: a "stop" elsewhere could be a dictation started since.
             val bar = ui.readAloud()?.takeIf { it.barShown }
             if (bar?.stop != null) {
                 ui.click(bar.stop)
-            } else if (SystemClock.elapsedRealtime() - readPressedAt < READ_START_MS) {
+            } else if (SystemClock.elapsedRealtime() < fetchPauseUntil) {
                 handler.postDelayed(this, TICK_MS)
             }
         }
@@ -451,6 +458,11 @@ class DictationController(
                 readPaused = false
             }
             speaking && inState < READ_MAX_MS -> quietSince = 0
+            // Still speaking at the time limit: stop it, rather than talk over it (#18).
+            speaking -> {
+                stopReading()
+                afterReading()
+            }
             quietSince == 0L -> quietSince = now
             // Wait out short pauses between sentences before calling it done.
             now - quietSince >= READ_DONE_QUIET_MS -> afterReading()

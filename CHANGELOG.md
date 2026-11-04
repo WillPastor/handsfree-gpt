@@ -16,7 +16,8 @@ Android 16.
   - Play/pause or tapping the pill pauses and resumes the reply. Next ⏭ skips the rest and starts talking, and
     previous ⏮ stops it.
   - A reply you pause in ChatGPT stays paused: the app waits rather than taking the pause for the end.
-  - Turning hands-free off pauses the reply, even one ChatGPT is still fetching.
+  - Turning hands-free off pauses the reply, even one ChatGPT is still fetching, and even if hands-free is
+    turned straight back on.
   - Switching to another app mid-reply doesn't lose track of it: the app waits for ChatGPT to come back.
   - The app never reads the reply text. It watches ChatGPT's buttons, its audio bar, and whether audio is playing.
 - The mock ChatGPT has a Read aloud button and ChatGPT's audio bar, and "speaks" for 6 s. End-to-end tests
@@ -24,7 +25,7 @@ Android 16.
   - reading, and waiting for the end
   - pausing, in ChatGPT and with play/pause
   - skipping, including before the speech has started
-  - turning hands-free off mid-reply
+  - turning hands-free off mid-reply, and straight back on
   - switching to another app mid-reply
 
   Debug-only receivers let the tests switch settings and take captures.
