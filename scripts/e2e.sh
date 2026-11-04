@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end test: drives HandsFree GPT against the mock ChatGPT (./mock-chatgpt) on an emulator
-# and checks in logcat what it pressed. Needs one running emulator; takes about seven minutes.
+# and checks in logcat what it pressed. Needs one running emulator; takes about eight minutes.
 #
 #   scripts/e2e.sh                      # build, install, run every scenario
 #   ADB=/path/to/adb scripts/e2e.sh     # if adb isn't on PATH
@@ -50,18 +50,22 @@ wait_for() { # until a log line matches $1, for at most $2 seconds
   done
   return 1
 }
+SAID='Hello from dictation. Send it.' # what the mock's dictations transcribe to, unless a scenario says otherwise
 mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) button labels, then go home.
-  # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to;
-  # a fourth, how long Read aloud takes to start speaking, in ms.
+  # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to
+  # ('' for nothing); a fourth, how long Read aloud takes to start speaking, in ms; a fifth of true starts it
+  # with a reply already in the chat; and a sixth of true makes it transcribe at once and reply in about 0.4 s.
   shell am force-stop com.openai.chatgpt
   shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" --ez ignore_send "${2:-false}" \
-    --es transcript "'${3:-Hello from dictation. Send it.}'" --ei read_delay "${4:-800}" >/dev/null
+    --es transcript "'${3-$SAID}'" --ei read_delay "${4:-800}" --ez replied "${5:-false}" \
+    --ez quick "${6:-false}" >/dev/null
   sleep 2
   shell input keyevent KEYCODE_HOME
   sleep 1
 }
 overlay_windows() { shell dumpsys window windows | grep -c 'handsfreegpt' || true; }
-user_tap() { # use the mock's audio bar as a person would: toggle (play/pause), rewind (to the start) or close
+user_tap() { # tap the mock as a person would: its dictation bar's cancel (X), stop (■) or send (↑), or its audio
+  # bar's toggle (play/pause), rewind (to the start) or close (X)
   adb_ shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target "$1" >/dev/null
 }
 no_voice() { grep -q 'voice commands unavailable' "$LOG"; }
@@ -169,7 +173,7 @@ begin
 handsfree START
 sleep 5
 shell input keyevent KEYCODE_MEDIA_NEXT
-sleep 3
+sleep 4 # ChatGPT takes 2 s to transcribe and send it, and only then does it count as sent
 shell input keyevent KEYCODE_MEDIA_PLAY_PAUSE
 sleep 6
 shell input keyevent KEYCODE_MEDIA_PREVIOUS
@@ -271,7 +275,7 @@ fi
 handsfree STOP
 
 step "12. Next ⏭ while ChatGPT is still fetching the speech: stops the reading once it starts, then talks"
-mock false false "" 4000
+mock false false "$SAID" 4000
 begin
 adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
 handsfree START
@@ -358,7 +362,7 @@ else
   expect "and pauses the reply" 'MockGPT.*TAP pause audio'
   expect_not "rather than letting it play on" 'MockGPT.*READ ALOUD DONE'
 fi
-mock false false "" 4000
+mock false false "$SAID" 4000
 begin
 adb_ shell am broadcast -n com.handsfreegpt/.DebugAudioReceiver --es asset send-it.pcm >/dev/null
 handsfree START
@@ -374,9 +378,94 @@ else
   expect_not "rather than letting it play on" 'MockGPT.*READ ALOUD DONE'
 fi
 handsfree STOP
+
+step "16. ChatGPT's own X during a dictation counts as cancelled: nothing is waited for, or read again (#13)"
+mock false false "$SAID" 800 true # a chat that already has a reply
+begin
+handsfree START
+wait_for 'LISTENING: ' 15 || true
+sleep 1
+user_tap cancel # ChatGPT's X
+sleep 12        # before the fix, the app waited 8 s for a reply, then read the last one again
+collect
+check "ChatGPT's X ends the dictation" in_order 'MockGPT.*USER taps cancel' 'MockGPT.*TAP cancel'
+expect "says it was cancelled" 'READY: .*Dictation cancelled'
+expect_not "doesn't wait for a reply" 'Waiting for reply'
+check "or read the last reply again" test "$(count 'MockGPT.*TAP read aloud')" -eq 0
+check "or listen again" test "$(count 'MockGPT.*TAP mic')" -eq 1
+handsfree STOP
+
+step "17. An empty dictation sent with ↑ sends nothing: nothing is waited for, or read again (#13)"
+mock false false "" 800 true # dictations transcribe to nothing, in a chat that already has a reply
+begin
+handsfree START
+wait_for 'LISTENING: ' 15 || true
+sleep 1
+tap_pill # finish without having said anything: continuous mode sends with ↑
+sleep 14
+collect
+check "↑ sends a dictation with nothing in it" in_order 'MockGPT.*TAP send' 'MockGPT.*TRANSCRIPT EMPTY'
+expect "says there was nothing to send" 'READY: .*Nothing to send'
+expect_not "doesn't wait for a reply" 'Waiting for reply'
+check "or read the last reply again" test "$(count 'MockGPT.*TAP read aloud')" -eq 0
+check "or listen again" test "$(count 'MockGPT.*TAP mic')" -eq 1
+handsfree STOP
+
+step "18. ChatGPT's own ■ keeps the text, which next ⏭ then sends, and its own ↑ still sends: both replies are read"
+mock false false "$SAID" 800 true
+begin
+handsfree START
+wait_for 'LISTENING: ' 15 || true
+sleep 1
+user_tap stop # ChatGPT's ■
+sleep 12
+collect
+check "ChatGPT's ■ ends the dictation" in_order 'MockGPT.*USER taps stop' 'MockGPT.*TRANSCRIPT READY'
+expect "and the app says the text is in the box" 'READY: .*Text is in the box'
+expect_not "rather than waiting for a reply" 'Waiting for reply'
+check "or reading the last one again" test "$(count 'MockGPT.*TAP read aloud')" -eq 0
+begin
+shell input keyevent KEYCODE_MEDIA_NEXT # send what's in the box
+wait_for 'MockGPT.*TAP read aloud' 20 || true
+collect
+expect "next ⏭ then sends it" 'MockGPT.*SENT: Hello from dictation\. Send it\.$'
+check "and the reply is read once it's done" in_order 'MockGPT.*REPLY DONE' 'MockGPT.*TAP read aloud'
+begin
+wait_for 'LISTENING: ' 20 || true # with the reply read, continuous mode listens again
+sleep 1
+user_tap send # ChatGPT's ↑
+wait_for 'MockGPT.*TAP read aloud' 20 || true
+collect
+check "ChatGPT's ↑ sends the dictation" in_order 'MockGPT.*USER taps send' 'MockGPT.*SENT: hello from dictation$'
+check "which still counts as sent: the reply is read once it's done" \
+  in_order 'MockGPT.*REPLY DONE' 'MockGPT.*TAP read aloud'
+handsfree STOP
+
+step "19. A reply that's over within half a second of the dictation ending still counts as sent (Codex review of #16)"
+mock false false "$SAID" 800 true true # ChatGPT transcribes at once, and its replies are over in about 0.4 s
+begin
+handsfree START
+wait_for 'LISTENING: ' 15 || true
+sleep 1
+user_tap send # ChatGPT's ↑: before the fix, the reply was over by the time the app first looked for one
+wait_for 'MockGPT.*TAP read aloud' 20 || true
+collect
+check "ChatGPT's ↑ sends it at once" in_order 'MockGPT.*USER taps send' 'MockGPT.*SENT: hello from dictation$'
+expect_not "which doesn't count as cancelled" 'Dictation cancelled'
+check "and the reply is read" in_order 'MockGPT.*REPLY DONE' 'MockGPT.*TAP read aloud'
+begin
+wait_for 'LISTENING: ' 20 || true # with the reply read, continuous mode listens again
+sleep 1
+tap_pill # finish talking: continuous mode sends with ↑
+wait_for 'MockGPT.*TAP read aloud' 20 || true
+collect
+check "so does the app's own ↑" in_order 'MockGPT.*TAP send' 'MockGPT.*SENT: hello from dictation$'
+expect_not "which doesn't count as sending nothing" 'Nothing to send'
+check "and that reply is read too" in_order 'MockGPT.*REPLY DONE' 'MockGPT.*TAP read aloud'
+handsfree STOP
 app_settings --ez read_aloud false --ez continuous false
 
-step "16. Leaving ChatGPT while a reply is read: keeps waiting for it, a tap brings ChatGPT back, and it listens once the reply has ended"
+step "20. Leaving ChatGPT while a reply is read: keeps waiting for it, a tap brings ChatGPT back, and it listens once the reply has ended"
 mock false
 app_settings --ez read_aloud true --ez continuous true
 begin

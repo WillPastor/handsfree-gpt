@@ -36,6 +36,19 @@ Android 16.
 
 ### Fixed
 
+- **Continuous mode waited for a reply when nothing had been sent, then read the previous reply aloud again**
+  ([#13](https://github.com/WillPastor/handsfree-gpt/issues/13)). Found in phone testing. It happened when a
+  dictation was cancelled with ChatGPT's own X, and when one with nothing in it was sent. After 8 s the app gave
+  up waiting and pressed Read aloud on the reply on screen, then listened again with nobody talking. A message now
+  only counts as sent once ChatGPT has taken it: a reply starts, or the text box empties.
+  - ChatGPT's own X counts as cancelled, as "cancel that" does. Its own ■ keeps the text in the box, and its
+    own ↑ still sends.
+  - A dictation sent with nothing in it shows "🤐 Nothing to send".
+  - Next ⏭ with text in the box now checks that it went too, as a voice command's send does.
+  - A reply already showing as the dictation bar goes counts as sent at once. A short one could otherwise be over
+    before the app first looked (Codex review of #16).
+  - End-to-end tests tap the mock's own X, ■ and ↑ during a dictation, send a dictation with nothing in it, and
+    have ChatGPT reply within half a second, in a chat that already has a reply.
 - **Chat text could pass for ChatGPT's buttons.** ChatGPT labels each paragraph of a reply with its own text.
   A reply with "stop" or "done" near the bottom of the screen could therefore look like a stop button, and the
   app would wait for it to go away. Text that can't be clicked no longer counts.
