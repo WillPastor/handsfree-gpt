@@ -10,8 +10,8 @@ android {
         applicationId = "com.handsfreegpt"
         minSdk = 29 // Android 10: apps may share the mic with an accessibility service
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.3.0"
+        versionCode = 5
+        versionName = "0.4.0"
     }
 
     buildTypes {

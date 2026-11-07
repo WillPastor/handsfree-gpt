@@ -34,10 +34,10 @@ happens first:
 - **You stop talking for a minute** (optional silence detection, and the time can be changed). Pausing to think
   doesn't end it.
 
-> **Status: v0.3.0.** Works with the live ChatGPT app on a Samsung Galaxy S26 Ultra running Android 16: dictation
-> and the "send it" voice command since v0.2.1, and reading replies aloud since v0.3.0. The steering-wheel buttons
-> and Android Auto haven't been tried in a car yet. Every change is also tested end to end on an emulator against
-> a mock ChatGPT. See [Limitations](#limitations).
+> **Status: v0.4.0.** Works with the live ChatGPT app on a Samsung Galaxy S26 Ultra running Android 16: dictation
+> and the "send it" voice command since v0.2.1, reading replies aloud since v0.3.0, and the minute of quiet before
+> a dictation ends since v0.4.0. The steering-wheel buttons and Android Auto haven't been tried in a car yet. Every
+> change is also tested end to end on an emulator against a mock ChatGPT. See [Limitations](#limitations).
 
 ## Demo
 
