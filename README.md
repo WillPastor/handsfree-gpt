@@ -197,6 +197,7 @@ Each planned feature has its own [issue](../../issues) with the details.
 - [ ] Prepare for a Google Play release ([#6](../../issues/6))
 - [ ] A new name without "GPT" ([#7](../../issues/7))
 - [ ] Try the steering-wheel buttons and Android Auto in a car ([#9](../../issues/9))
+- [ ] Maybe: more natural voice commands, possibly with on-device AI ([#21](../../issues/21))
 - [ ] Start a new chat, or go back to another, by voice ([#25](../../issues/25))
 - [ ] Decide whether the app may read a reply's text itself, with the phone's own voice ([#26](../../issues/26))
 - [ ] Talk to Codex hands-free, in the ChatGPT app ([#27](../../issues/27))
