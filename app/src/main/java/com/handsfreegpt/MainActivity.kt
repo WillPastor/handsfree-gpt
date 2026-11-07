@@ -28,6 +28,7 @@ import android.widget.TextView
 import android.widget.Toast
 import java.io.File
 import java.util.Locale
+import kotlin.math.abs
 
 /** Setup checklist, start button and settings. Plain platform views: no extra libraries. */
 class MainActivity : Activity() {
@@ -182,18 +183,20 @@ class MainActivity : Activity() {
 
         col += header("Timing")
         col += switch("Also stop when I go quiet", prefs.stopOnSilence) { prefs.stopOnSilence = it }
-        col += slider("Stop after this much silence", 600, 5000, 100, prefs.silenceMs, ::seconds) { prefs.silenceMs = it }
+        col += slider("Stop after this much silence", SILENCE_STEPS_MS, prefs.silenceMs, ::duration) {
+            prefs.silenceMs = it
+        }
         col += slider("Speech must be louder than background by", 4, 24, 1, prefs.sensitivityDb, { "$it dB" }) {
             prefs.sensitivityDb = it
         }
         col += hint("Raise it if road noise keeps it listening; lower it if it cuts you off or never notices you talking.")
         col += slider("Cancel if nothing is said within", 0, 30000, 1000, prefs.noSpeechTimeoutMs, {
-            if (it == 0) "never" else seconds(it)
+            if (it == 0) "never" else duration(it)
         }) { prefs.noSpeechTimeoutMs = it }
-        col += slider("Longest single dictation", 15000, 300000, 5000, prefs.maxListenMs, ::seconds) {
+        col += slider("Longest single dictation", 15000, 600000, 15000, prefs.maxListenMs, ::duration) {
             prefs.maxListenMs = it
         }
-        col += slider("If silence can't be detected, stop after", 5000, 60000, 1000, prefs.fallbackStopMs, ::seconds) {
+        col += slider("If silence can't be detected, stop after", 5000, 60000, 1000, prefs.fallbackStopMs, ::duration) {
             prefs.fallbackStopMs = it
         }
 
@@ -394,7 +397,13 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun seconds(ms: Int) = if (ms % 1000 == 0) "${ms / 1000} s" else "%.1f s".format(ms / 1000f)
+    /** "1.6 s", "45 s", "1 min" or "1 min 30 s". */
+    private fun duration(ms: Int): String {
+        if (ms < 60_000) return if (ms % 1000 == 0) "${ms / 1000} s" else "%.1f s".format(ms / 1000f)
+        val min = ms / 60_000
+        val s = ms % 60_000 / 1000
+        return if (s == 0) "$min min" else "$min min $s s"
+    }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
@@ -450,6 +459,12 @@ class MainActivity : Activity() {
     private fun slider(
         title: String, min: Int, max: Int, step: Int, value: Int,
         format: (Int) -> String, onChange: (Int) -> Unit,
+    ) = slider(title, (min..max step step).toList(), value, format, onChange)
+
+    /** A slider over [values], smallest first. A saved value between two of them puts the thumb at the nearest. */
+    private fun slider(
+        title: String, values: List<Int>, value: Int,
+        format: (Int) -> String, onChange: (Int) -> Unit,
     ): View {
         val label = text("", 15f)
         fun render(v: Int) {
@@ -457,11 +472,11 @@ class MainActivity : Activity() {
         }
         render(value)
         val bar = SeekBar(this).apply {
-            this.max = (max - min) / step
-            progress = (value.coerceIn(min, max) - min) / step
+            this.max = values.lastIndex
+            progress = values.indices.minBy { abs(values[it] - value) }
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                    val v = min + progress * step
+                    val v = values[progress]
                     render(v)
                     if (fromUser) onChange(v)
                 }
@@ -481,6 +496,12 @@ class MainActivity : Activity() {
     companion object {
         const val ACTION_START = "com.handsfreegpt.action.START"
         const val ACTION_STOP = "com.handsfreegpt.action.STOP"
+
+        /** Fine steps for a quick stop in a quiet room, coarse ones for pausing to think. */
+        private val SILENCE_STEPS_MS = listOf(
+            600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2500, 3000, 4000, 5000, 7500,
+            10_000, 15_000, 20_000, 30_000, 45_000, 60_000, 90_000, 120_000, 180_000, 300_000,
+        )
     }
 
     private fun words(title: String, value: String, save: (String) -> Unit): View {

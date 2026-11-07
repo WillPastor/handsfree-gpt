@@ -3,6 +3,20 @@
 Notable changes to this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Pausing to think no longer ends a dictation.** Silence detection now waits for a minute of quiet, up from
+  1.6 s, so saying "send it" or pressing a button is the usual way to finish. With the default settings, this also
+  makes [#8](https://github.com/WillPastor/handsfree-gpt/issues/8) unlikely. The setting goes from 0.6 s to
+  5 minutes, in fine steps at the short end and coarse ones at the long end.
+- **A single dictation can last almost 10 minutes**, up from 90 s. The default, 9 min 45 s, is just under the
+  10 minutes ChatGPT records, so the app finishes the dictation as usual, sending it if auto-send is on. If
+  ChatGPT stopped it first, the text would stay in the box. The setting goes up to 10 minutes, in 15 s steps.
+- Settings show times of a minute or more in minutes, such as "1 min 30 s".
+- Settings you've changed yourself are kept. Only the defaults are new.
+
 ## [0.3.0] - 2026-11-05
 
 ChatGPT's replies can now be read aloud. Checked with the live ChatGPT app on a Samsung Galaxy S26 Ultra running
