@@ -3,7 +3,11 @@
 Notable changes to this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-07
+
+Pausing to think no longer ends a dictation: the app waits for a minute of quiet, and a single dictation can last
+almost 10 minutes. The new wait and the read-aloud fix were checked with the live ChatGPT app on a Samsung Galaxy
+S26 Ultra running Android 16.
 
 ### Changed
 
