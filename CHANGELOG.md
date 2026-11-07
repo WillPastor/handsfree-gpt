@@ -17,6 +17,17 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Settings show times of a minute or more in minutes, such as "1 min 30 s".
 - Settings you've changed yourself are kept. Only the defaults are new.
 
+### Fixed
+
+- **Read aloud read an older reply when the chat was scrolled up**
+  ([#17](https://github.com/WillPastor/handsfree-gpt/issues/17)). Found in phone testing. ChatGPT only shows the
+  messages on screen, so the latest reply's Read aloud button wasn't there to find, and the app pressed an older
+  reply's instead. With no Read aloud on screen at all, it said it couldn't find one. The app now scrolls the
+  chat back to the bottom first, then presses the latest reply's button.
+  - Captures show which parts of ChatGPT's screen scroll, and which ways they can go.
+  - The mock ChatGPT keeps a Read aloud button under every reply, as the real app does, and a test can scroll
+    its chat up. An end-to-end test scrolls up to an earlier reply while the new one comes in.
+
 ## [0.3.0] - 2026-11-05
 
 ChatGPT's replies can now be read aloud. Checked with the live ChatGPT app on a Samsung Galaxy S26 Ultra running

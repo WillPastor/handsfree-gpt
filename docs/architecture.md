@@ -206,6 +206,12 @@ starts the next dictation, or both.
 itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 - **Finding the button.** Replies can sit anywhere on screen, so this one search covers the whole window and
   takes the lowest match: the latest reply. Labels are matched like every other button, and are editable.
+- **Scrolling to it first.** ChatGPT only shows the messages on screen. With the chat scrolled up, the latest
+  reply's button is out of sight, and an older reply's can be the lowest one there, which the app used to press
+  ([#17](https://github.com/WillPastor/handsfree-gpt/issues/17)). So before the press, the app scrolls the chat
+  back to the bottom, a screen per tick, using the accessibility *scroll down* action. The chat is the biggest
+  thing in the window that scrolls, and it's only moved if it can go down, so a list that scrolls sideways
+  never is. After 30 screens the app stops scrolling and looks for the button anyway.
 - **ChatGPT's audio bar.** Once Read aloud is pressed, ChatGPT shows a bar at the top of the screen:
   `[pause/play] 00:04 [seek bar] [X]`. Its button says "Pause audio" while the reply plays and "Play audio"
   otherwise. The X, labelled "Close", is found by position rather than by its label, so it works in any
@@ -242,15 +248,16 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   yet, and any bar showing is still the previous reply's. A control pressed then waits until the speech starts
   and stops it at once, so it can't play over the next dictation. If the speech never starts within 8 s of the
   press, the app moves on. Also found by the Codex review of #12.
-- **Failures.** If the button can't be found within 5 s, or the reading doesn't start within 8 s even after a
-  second press, the app saves a capture and says so in amber.
+- **Failures.** If the button can't be found within 5 s of the chat reaching the bottom, or the reading doesn't
+  start within 8 s even after a second press, the app saves a capture and says so in amber. Captures mark what
+  scrolls, and which ways it can go, such as `SCROLL(up,back)`.
 
 ## Testing
 
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (90 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (95 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -270,11 +277,13 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   showing but disabled. Its *quick* mode transcribes at once and finishes each reply in about 0.4 s.
 - Each reply ends with a paragraph labelled with its own text, as ChatGPT labels them, which mentions "stop"
   and "done".
-- A finished reply gets a Read aloud button, which stays through the next dictation, as in the real app. After
-  0.8 s fetching the speech, which a test can lengthen, it shows ChatGPT's audio bar and "speaks" for 6 s as a
-  real audio player playing silence. As in the real app, pausing stops the player, and the bar stays after the
-  end, showing play with its seek bar at the end. A test can tap the bar, or drag its seek bar back to the
-  start, as a person would.
+- Every finished reply keeps its own Read aloud button, as in the real app. After 0.8 s fetching the speech,
+  which a test can lengthen, it shows ChatGPT's audio bar and "speaks" for 6 s as a real audio player playing
+  silence. As in the real app, pausing stops the player, and the bar stays after the end, showing play with its
+  seek bar at the end. A test can tap the bar, or drag its seek bar back to the start, as a person would.
+- The chat keeps the latest message in view, unless a test scrolls it up to the top, where it stays as a reply
+  comes in. Its *long* mode makes replies taller than the screen, so an earlier reply's Read aloud can be on
+  screen while the new one's isn't.
 - A test can tap the dictation bar's own X, ■ and ↑ too, and start the mock with a reply already in the chat.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
   makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations

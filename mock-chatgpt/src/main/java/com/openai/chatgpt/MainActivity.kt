@@ -18,6 +18,7 @@ import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
+import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -38,11 +39,13 @@ import kotlin.math.sqrt
  * its send arrow showing but disabled, before the transcript is in it.
  * Like the real app, every paragraph of a reply is labelled with its own text. The last one mentions "stop" and
  * "done", which must never pass for buttons.
- * A finished reply gets a Read aloud button, which stays through the next dictation, as in the real app, until
- * another message is sent. As in the real app (1.2026.300), pressing it fetches the speech for a moment, then
- * shows an audio bar at the top, [pause/play] 00:00 [seek bar] [X], and "speaks" (a real player, playing silence)
- * for 6 s. Pausing stops the player. Once the speech ends, the bar stays, showing play with its seek bar at the
- * end. Its X has no label (the real one says "Close"), so the tests show the app finds it by position.
+ * Every finished reply keeps its own Read aloud button, as in the real app. As in the real app (1.2026.300),
+ * pressing it fetches the speech for a moment, then shows an audio bar at the top, [pause/play] 00:00 [seek bar]
+ * [X], and "speaks" (a real player, playing silence) for 6 s. Pausing stops the player. Once the speech ends, the
+ * bar stays, showing play with its seek bar at the end. Its X has no label (the real one says "Close"), so the
+ * tests show the app finds it by position.
+ * The chat keeps the latest message in view, unless it has been scrolled up. Then an older reply's Read aloud can
+ * be the one on screen, and the latest reply's is out of sight (#17).
  * Launch flags, remembered across launches:
  *   --ez odd true          labels the automation doesn't know (tests the position fallback)
  *   --ez ignore_send true  the send arrow does nothing, as if the message couldn't be sent
@@ -51,14 +54,16 @@ import kotlin.math.sqrt
  *   --ei read_delay 4000   how long Read aloud takes to start speaking, in ms (default 800)
  *   --ez replied true      the chat already has a reply, with its Read aloud button
  *   --ez quick true        dictations transcribe at once, and replies are over in about 0.4 s
+ *   --ez long true         replies are taller than the screen: a word a line, for 8 s
  * To tap something as a person would: the dictation bar's "cancel" (X), "stop" (■) or "send" (↑), or the audio
- * bar's "toggle" (play/pause), "rewind" (drag the seek bar back to the start) or "close" (X):
+ * bar's "toggle" (play/pause), "rewind" (drag the seek bar back to the start) or "close" (X). Or "scroll_top" to
+ * scroll the chat up to the top, where it stays as a reply comes in:
  *   adb shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target toggle
  */
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
-    private lateinit var transcript: TextView
-    private lateinit var lastParagraph: TextView
+    private lateinit var scroll: ScrollView
+    private lateinit var chat: LinearLayout
     private lateinit var input: EditText
     private lateinit var composer: LinearLayout
     private lateinit var bar: LinearLayout
@@ -66,7 +71,6 @@ class MainActivity : Activity() {
     private lateinit var barStop: ImageButton
     private lateinit var barSend: ImageButton
     private lateinit var trailing: ImageButton
-    private lateinit var actions: LinearLayout
     private lateinit var audioBar: LinearLayout
     private lateinit var audioToggle: ImageButton
     private lateinit var audioTime: TextView
@@ -78,6 +82,9 @@ class MainActivity : Activity() {
     private var dictated = DEFAULT_TRANSCRIPT
     private var readDelay = READ_DELAY_MS
     private var quick = false
+    private var longReplies = false
+    private var replies = 0
+    private var followChat = true // keep the latest message in view, until the chat is scrolled up
     private var speech: AudioTrack? = null
     private var playedMs = 0
     private val startSpeaking = Runnable { play() }
@@ -107,6 +114,7 @@ class MainActivity : Activity() {
                 "toggle" -> tap(audioToggle)
                 "rewind" -> rewind()
                 "close" -> tap(audioClose)
+                "scroll_top" -> scrollToTop()
             }
         }
 
@@ -119,7 +127,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sp = getSharedPreferences("mock", MODE_PRIVATE)
-        for (flag in listOf("odd", "ignore_send", "replied", "quick")) {
+        for (flag in listOf("odd", "ignore_send", "replied", "quick", "long")) {
             if (intent.hasExtra(flag)) sp.edit().putBoolean(flag, intent.getBooleanExtra(flag, false)).apply()
         }
         intent.getStringExtra("transcript")?.let { sp.edit().putString("transcript", it).apply() }
@@ -129,8 +137,20 @@ class MainActivity : Activity() {
         dictated = sp.getString("transcript", null) ?: DEFAULT_TRANSCRIPT
         readDelay = sp.getInt("read_delay", READ_DELAY_MS)
         quick = sp.getBoolean("quick", false)
-        transcript = TextView(this).apply { textSize = 14f; text = "Mock ChatGPT (odd labels=$odd)\n" }
-        lastParagraph = TextView(this).apply { textSize = 14f; visibility = View.GONE }
+        longReplies = sp.getBoolean("long", false)
+        chat = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.BOTTOM // a short chat sits just above the composer
+            addView(message("Mock ChatGPT (odd labels=$odd)"))
+            // Like the real app, it keeps the latest message in view, unless it has been scrolled up.
+            viewTreeObserver.addOnGlobalLayoutListener { if (followChat) scroll.scrollTo(0, height) }
+        }
+        scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(chat)
+            // Back at the bottom, it follows the chat again.
+            setOnScrollChangeListener { _, _, _, _, _ -> if (!canScrollVertically(1)) followChat = true }
+        }
         input = EditText(this).apply {
             hint = "Ask ChatGPT"
             addTextChangedListener(object : TextWatcher {
@@ -153,11 +173,6 @@ class MainActivity : Activity() {
         }
         barSend = button(android.R.drawable.ic_menu_send, "Send") { endDictation("send") }
         bar = row(barCancel, waveform, barStop, barSend).apply { visibility = View.GONE }
-        // Under the latest reply: [copy] [read aloud].
-        actions = row(
-            button(android.R.drawable.ic_menu_agenda, "Copy") { Log.i(TAG, "TAP copy") },
-            button(android.R.drawable.ic_lock_silent_mode_off, "Read aloud") { onReadAloud() },
-        ).apply { visibility = View.GONE }
         // At the top while a reply is read: [pause/play] 00:00 [seek bar] [X].
         audioToggle = button(android.R.drawable.ic_media_pause, "Pause audio") { onAudioToggle() }
         audioTime = TextView(this).apply { text = "00:00" }
@@ -176,14 +191,12 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
             addView(audioBar, LinearLayout.LayoutParams(-1, -2))
-            addView(ScrollView(context).apply { addView(transcript) }, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(lastParagraph, LinearLayout.LayoutParams(-1, -2))
-            addView(actions, LinearLayout.LayoutParams(-1, -2))
+            addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
         })
         if (sp.getBoolean("replied", false)) {
-            transcript.append("\nYou: an earlier question\nGPT: an earlier reply")
-            showReply()
+            chat.addView(message("You: an earlier question"))
+            finishReply(newReply().apply { body.append(" an earlier reply") })
         }
         updateTrailing()
     }
@@ -272,38 +285,65 @@ class MainActivity : Activity() {
 
     private fun send(text: String) {
         Log.i(TAG, "SENT: $text")
-        actions.visibility = View.GONE // a new turn
-        transcript.append("\nYou: $text\nGPT:")
+        chat.addView(message("You: $text"))
+        val reply = newReply()
         input.setText("")
         generating = true
         updateTrailing()
         var words = 0
-        val length = if (quick) 5 else 30 // a word every 100 ms
+        val length = if (quick) 5 else if (longReplies) LONG_REPLY_WORDS else 30 // a word every 100 ms
         handler.post(object : Runnable {
             override fun run() {
                 if (!generating) return
-                transcript.append(" word${++words}")
+                reply.body.append(if (longReplies) "\nword${++words}" else " word${++words}")
                 if (words < length) handler.postDelayed(this, 100) else {
                     generating = false
                     updateTrailing()
-                    showReply()
+                    finishReply(reply)
                     Log.i(TAG, "REPLY DONE")
                 }
             }
         })
     }
 
+    private fun message(text: String) = TextView(this).apply {
+        textSize = 14f
+        this.text = text
+    }
+
+    /** A reply in the chat: "GPT:" and the words as they come in, then its last paragraph and buttons. */
+    private class Reply(val number: Int, val view: LinearLayout, val body: TextView)
+
+    private fun newReply(): Reply {
+        val body = message("GPT:")
+        val view = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(body)
+        }
+        chat.addView(view)
+        return Reply(++replies, view, body)
+    }
+
     /** A finished reply: its last paragraph, labelled with its own text, then Copy and Read aloud under it. */
-    private fun showReply() {
-        lastParagraph.text = LAST_PARAGRAPH
-        lastParagraph.contentDescription = LAST_PARAGRAPH
-        lastParagraph.visibility = View.VISIBLE
-        actions.visibility = View.VISIBLE
+    private fun finishReply(reply: Reply) {
+        reply.view.addView(message(LAST_PARAGRAPH).apply { contentDescription = LAST_PARAGRAPH })
+        reply.view.addView(
+            row(
+                button(android.R.drawable.ic_menu_agenda, "Copy") { Log.i(TAG, "TAP copy") },
+                button(android.R.drawable.ic_lock_silent_mode_off, "Read aloud") { onReadAloud(reply.number) },
+            ),
+        )
+    }
+
+    /** Scrolls the chat up to the top, as a person would to read back. It stays there as a reply comes in. */
+    private fun scrollToTop() {
+        followChat = false
+        scroll.scrollTo(0, 0)
     }
 
     /** Fetches the speech for a moment, then reads the reply out from the start. */
-    private fun onReadAloud() {
-        Log.i(TAG, "TAP read aloud")
+    private fun onReadAloud(reply: Int) {
+        Log.i(TAG, "TAP read aloud (reply $reply)")
         silence()
         playedMs = 0
         handler.removeCallbacks(startSpeaking)
@@ -412,6 +452,7 @@ class MainActivity : Activity() {
         const val TRANSCRIBE_MS = 2000L
         const val DEFAULT_TRANSCRIPT = "Hello from dictation. Send it."
         const val LAST_PARAGRAPH = "Stop reading here if you like: that's all done."
+        const val LONG_REPLY_WORDS = 80
         const val READ_MS = 6000
         const val SPEECH_TICK_MS = 100
         const val READ_DELAY_MS = 800
