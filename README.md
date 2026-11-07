@@ -6,7 +6,7 @@
 
 <p align="center">
   Hands-free dictation for the ChatGPT Android app: talk, then say "send it" or press the steering-wheel button.<br>
-  No voice mode, so you keep the full text models.
+  No voice mode: nothing is sent until you're done, and your chosen text model answers.
 </p>
 
 <p align="center">
@@ -20,9 +20,10 @@
 
 ---
 
-ChatGPT's voice mode is convenient, but it runs on a separate, voice-tuned model. **Dictation** keeps you on
-the regular models, with full reasoning and long answers. The catch is that it needs a tap to start and another
-to stop, which doesn't work when your hands are on the steering wheel.
+ChatGPT's voice mode is convenient, but it answers when you pause, and its own voice model runs the conversation,
+deciding which questions to pass to the text models. **Dictation** turns what you say into an ordinary message for
+the model you picked, with full reasoning and long answers, sent when you're done. The catch is that it needs a
+tap to start and another to stop, which doesn't work when your hands are on the steering wheel.
 
 **HandsFree GPT does the tapping.** It starts ChatGPT's dictation, then finishes it in whichever of these
 happens first:
