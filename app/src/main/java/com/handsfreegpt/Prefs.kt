@@ -8,8 +8,11 @@ import kotlin.reflect.KProperty
 class Prefs(context: Context) {
     private val sp = context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-    /** How long you must be quiet (after speaking) before dictation is stopped. */
-    var silenceMs by intPref("silence_ms", 1600)
+    /**
+     * How long you must be quiet (after speaking) before dictation is stopped. A minute, so a pause to think
+     * doesn't end it: "send it" or a button is the usual way to finish.
+     */
+    var silenceMs by intPref("silence_ms", 60_000)
 
     /** How far (dB) above the background noise a sound must be to count as speech. */
     var sensitivityDb by intPref("sensitivity_db", 10)
@@ -17,8 +20,11 @@ class Prefs(context: Context) {
     /** Give up (cancel dictation) if nothing is said for this long. 0 = wait forever. */
     var noSpeechTimeoutMs by intPref("no_speech_timeout_ms", 12000)
 
-    /** Hard cap on a single dictation. */
-    var maxListenMs by intPref("max_listen_ms", 90000)
+    /**
+     * Hard cap on a single dictation. Just under the 10 minutes ChatGPT records, so the app finishes it as usual
+     * (sending it, with auto-send) rather than ChatGPT stopping it and leaving the text in the box.
+     */
+    var maxListenMs by intPref("max_listen_ms", 585_000)
 
     /** Used when Android won't share the microphone with us, so silence can't be detected. */
     var fallbackStopMs by intPref("fallback_stop_ms", 15000)

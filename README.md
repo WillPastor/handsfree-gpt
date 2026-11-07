@@ -31,7 +31,8 @@ happens first:
   offline on the phone, works over road noise, music or passengers, and is removed from your message.
 - **You press a steering-wheel or headset button**: ⏭ sends, ⏮ cancels. It also works from Android Auto's
   media screen.
-- **You stop talking** (optional silence detection).
+- **You stop talking for a minute** (optional silence detection, and the time can be changed). Pausing to think
+  doesn't end it.
 
 > **Status: v0.3.0.** Works with the live ChatGPT app on a Samsung Galaxy S26 Ultra running Android 16: dictation
 > and the "send it" voice command since v0.2.1, and reading replies aloud since v0.3.0. The steering-wheel buttons
