@@ -197,6 +197,11 @@ Each planned feature has its own [issue](../../issues) with the details.
 - [ ] Prepare for a Google Play release ([#6](../../issues/6))
 - [ ] A new name without "GPT" ([#7](../../issues/7))
 - [ ] Try the steering-wheel buttons and Android Auto in a car ([#9](../../issues/9))
+- [ ] Start a new chat, or go back to another, by voice ([#25](../../issues/25))
+- [ ] Decide whether the app may read a reply's text itself, with the phone's own voice ([#26](../../issues/26))
+- [ ] Talk to Codex hands-free, in the ChatGPT app ([#27](../../issues/27))
+- [ ] Switch between a chat and Codex by voice ([#28](../../issues/28))
+- [ ] Maybe: read a reply with the phone's own voice when Read aloud fails ([#29](../../issues/29))
 - [x] ~~Read replies aloud~~: shipped in v0.3.0 and checked on a real phone ([#3](../../issues/3))
 - [x] ~~Verify against the live ChatGPT app~~: dictation and "send it" checked on a real phone for v0.2.1
 - [x] ~~Android Auto controller~~: shipped in v0.2.0 as a media source with Talk / Send / Cancel
