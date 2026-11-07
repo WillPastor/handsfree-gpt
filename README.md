@@ -69,8 +69,9 @@ tests. The live words come from Android's on-device recogniser hearing a synthes
 - **Auto-send** and an experimental **continuous conversation** mode that sends, waits for the reply, then
   listens again. If nothing was sent, for example after you tap ChatGPT's own X, it pauses instead.
 - **Replies read aloud.** When a reply finishes, the app presses ChatGPT's own Read aloud button and waits for it
-  to finish before listening again. It never reads your chats itself. Play/pause pauses a reply, and next ⏭
-  skips the rest. If you pause it in ChatGPT, the app waits for you, and turning hands-free off pauses it too.
+  to finish before listening again. If you've scrolled up the chat, it scrolls back down to the new reply first.
+  It never reads your chats itself. Play/pause pauses a reply, and next ⏭ skips the rest. If you pause it in
+  ChatGPT, the app waits for you, and turning hands-free off pauses it too.
 - **Floating status pill** that shows the words as they're heard. Tap it to talk or stop, hold it to exit,
   drag to move it. It keeps the screen on.
 - **Robust button finding.** Buttons are matched by accessibility label, with button position as a fallback.
@@ -158,7 +159,7 @@ scripts/e2e.sh                       # end-to-end, on a running emulator (~8 min
 | Layer | What it checks |
 |---|---|
 | **Unit** (17 tests) | [`SpeechTrackerTest`](app/src/test/java/com/handsfreegpt/SpeechTrackerTest.kt) runs silence detection on synthetic audio: road noise, pauses, rising noise, timeouts. [`VoiceCommandsTest`](app/src/test/java/com/handsfreegpt/VoiceCommandsTest.kt) checks that commands fire only at the end and how the command is stripped from the text |
-| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh), 90 checks) | Runs on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double that holds the mic, takes time to transcribe and can read replies aloud, like the real app. Covers: start, auto-cancel, tap to stop, the position fallback, long-press exit, the tile, **media buttons**, a **spoken "…send it"** replayed into Android's on-device recogniser, which must send the message without the command (even when the message itself ends in "send it"), a send that doesn't go through, which must not be reported as sent, dictations ended with ChatGPT's own X, ■ or ↑, or with nothing in them, where only a message ChatGPT took may count as sent, even one whose reply is over within half a second, and **reading replies aloud**: pausing a reply in ChatGPT or with play/pause, stopping or skipping it, even before ChatGPT starts speaking, and turning hands-free off or switching apps mid-reply. Replies mention "stop" and "done", which must never pass for buttons, and captures must leave out chat text |
+| **End to end** ([`scripts/e2e.sh`](scripts/e2e.sh), 95 checks) | Runs on an emulator against [`mock-chatgpt`](mock-chatgpt), a test double that holds the mic, takes time to transcribe and can read replies aloud, like the real app. Covers: start, auto-cancel, tap to stop, the position fallback, long-press exit, the tile, **media buttons**, a **spoken "…send it"** replayed into Android's on-device recogniser, which must send the message without the command (even when the message itself ends in "send it"), a send that doesn't go through, which must not be reported as sent, dictations ended with ChatGPT's own X, ■ or ↑, or with nothing in them, where only a message ChatGPT took may count as sent, even one whose reply is over within half a second, and **reading replies aloud**: pausing a reply in ChatGPT or with play/pause, stopping or skipping it, even before ChatGPT starts speaking, turning hands-free off or switching apps mid-reply, and reading the new reply when the chat is scrolled up to an older one. Replies mention "stop" and "done", which must never pass for buttons, and captures must leave out chat text |
 | **CI** ([GitHub Actions](.github/workflows/ci.yml)) | Lint, unit tests and both APKs on every push |
 
 ## Project structure

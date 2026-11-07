@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.Date
 import java.util.Locale
@@ -196,6 +197,48 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
         return ReadAloud(read, stop, resumeBar?.toggle ?: resume, bar?.close, bar?.position)
     }
 
+    /**
+     * Scrolls ChatGPT's chat a screen further down, unless it's at the bottom already. ChatGPT only shows the
+     * messages on screen, so with the chat scrolled up, the latest reply's Read aloud isn't there to be found, and
+     * an older reply's can be (#17). Only a chat that scrolls down is moved, never one that scrolls sideways.
+     * False once the chat is at the bottom, or if there's no chat to scroll.
+     */
+    fun scrollChatDown(): Boolean {
+        val chat = chatList() ?: return false
+        chat.refresh() // which ways it can scroll change as it moves
+        if (chat.actionList.none { it.id == SCROLL_DOWN }) return false
+        return chat.performAction(SCROLL_DOWN).also { Log.i(TAG, "scrolled the chat down: $it") }
+    }
+
+    /** The chat: the biggest thing in ChatGPT's window that scrolls, if it's tall enough to be the messages. */
+    private fun chatList(): AccessibilityNodeInfo? {
+        val root = root() ?: return null
+        val minHeight = boundsOf(root).height() * CHAT_MIN_HEIGHT
+        var chat: AccessibilityNodeInfo? = null
+        var chatArea = 0
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var visited = 0
+        while (queue.isNotEmpty() && visited < MAX_NODES) {
+            val n = queue.removeFirst()
+            visited++
+            for (i in 0 until n.childCount) n.getChild(i)?.let(queue::add)
+            if (!n.isScrollable || !n.isVisibleToUser) continue
+            val r = boundsOf(n)
+            val area = r.width() * r.height()
+            if (r.height() >= minHeight && area > chatArea) {
+                chat = n
+                chatArea = area
+            }
+        }
+        return chat
+    }
+
+    /** Which ways [n] can scroll right now, such as "(up,down)". */
+    private fun scrollWays(n: AccessibilityNodeInfo): String {
+        val ids = n.actionList.map { it.id }.toSet()
+        return SCROLL_WAYS.filterValues { it in ids }.keys.joinToString(",", "(", ")")
+    }
+
     private class AudioBar(val toggle: Btn, val close: Btn?, val position: Float?)
 
     /**
@@ -324,7 +367,9 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
         val version = runCatching { service.packageManager.getPackageInfo(PKG, 0).versionName }.getOrNull()
         append("ChatGPT ").append(version ?: "not found").append('\n')
         append("Detected: ").append(snapshot() ?: "ChatGPT window not on screen").append('\n')
-        append("Read aloud: ").append(readAloud() ?: "-").append("\n\n")
+        append("Read aloud: ").append(readAloud() ?: "-").append('\n')
+        append("Chat: ").append(chatList()?.let { boundsOf(it).toShortString() + " SCROLL" + scrollWays(it) } ?: "-")
+        append("\n\n")
         var lines = 0
         for (w in service.windows) {
             val r = w.root
@@ -356,6 +401,7 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
         if (n.isEditable) append(" EDIT")
         if (!n.isEnabled) append(" DISABLED")
         if (!n.isVisibleToUser) append(" HIDDEN")
+        if (n.isScrollable) append(" SCROLL").append(scrollWays(n))
         append(' ').append(r.toShortString()).append('\n')
         for (i in 0 until n.childCount) n.getChild(i)?.let { lines = dumpNode(it, depth + 1, level + 1, lines) }
         return lines
@@ -376,7 +422,7 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
     private fun plain(n: AccessibilityNodeInfo, cls: String) =
         (cls == "View" || cls.endsWith("Layout")) && n.viewIdResourceName == null && n.contentDescription == null &&
             n.text == null && n.hintText == null && n.rangeInfo == null &&
-            !n.isClickable && !n.isLongClickable && !n.isEditable
+            !n.isClickable && !n.isLongClickable && !n.isEditable && !n.isScrollable
 
     companion object {
         const val PKG = "com.openai.chatgpt"
@@ -388,6 +434,19 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
             context.packageManager.getLaunchIntentForPackage(PKG)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         private const val MAX_NODES = 2500
+
+        /** The chat takes up most of the window, and still a good part of it with the keyboard up. */
+        private const val CHAT_MIN_HEIGHT = 0.3f
+        private val SCROLL_DOWN = AccessibilityAction.ACTION_SCROLL_DOWN.id
+        private val SCROLL_WAYS = mapOf(
+            "up" to AccessibilityAction.ACTION_SCROLL_UP.id,
+            "down" to SCROLL_DOWN,
+            "left" to AccessibilityAction.ACTION_SCROLL_LEFT.id,
+            "right" to AccessibilityAction.ACTION_SCROLL_RIGHT.id,
+            "back" to AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
+            "forward" to AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+        )
+
         // The full voice-mode ("GPT live") button — never pressed, only used as a landmark.
         private val VOICE_MODE_WORDS = listOf("voice conversation", "voice mode", "voice chat", "advanced voice")
     }

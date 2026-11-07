@@ -54,18 +54,19 @@ SAID='Hello from dictation. Send it.' # what the mock's dictations transcribe to
 mock() { # (re)start the mock ChatGPT with known (false) or unknown (true) button labels, then go home.
   # A second argument of true makes its send arrow do nothing; a third sets what dictations transcribe to
   # ('' for nothing); a fourth, how long Read aloud takes to start speaking, in ms; a fifth of true starts it
-  # with a reply already in the chat; and a sixth of true makes it transcribe at once and reply in about 0.4 s.
+  # with a reply already in the chat; a sixth of true makes it transcribe at once and reply in about 0.4 s; and a
+  # seventh of true makes its replies taller than the screen.
   shell am force-stop com.openai.chatgpt
   shell am start -n com.openai.chatgpt/.MainActivity --ez odd "$1" --ez ignore_send "${2:-false}" \
     --es transcript "'${3-$SAID}'" --ei read_delay "${4:-800}" --ez replied "${5:-false}" \
-    --ez quick "${6:-false}" >/dev/null
+    --ez quick "${6:-false}" --ez long "${7:-false}" >/dev/null
   sleep 2
   shell input keyevent KEYCODE_HOME
   sleep 1
 }
 overlay_windows() { shell dumpsys window windows | grep -c 'handsfreegpt' || true; }
 user_tap() { # tap the mock as a person would: its dictation bar's cancel (X), stop (■) or send (↑), or its audio
-  # bar's toggle (play/pause), rewind (to the start) or close (X)
+  # bar's toggle (play/pause), rewind (to the start) or close (X); or scroll_top, to scroll its chat up to the top
   adb_ shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target "$1" >/dev/null
 }
 no_voice() { grep -q 'voice commands unavailable' "$LOG"; }
@@ -516,6 +517,27 @@ else
 fi
 handsfree STOP
 app_settings --ez read_aloud false --ez continuous false
+
+step "22. Read aloud with the chat scrolled up: scrolls back down, then reads the new reply, not an older one (#17)"
+mock false false "$SAID" 800 true false true # a reply already in the chat, and replies taller than the screen
+app_settings --ez read_aloud true
+begin
+handsfree START
+wait_for 'LISTENING: ' 15 || true
+sleep 1
+shell input keyevent KEYCODE_MEDIA_NEXT # send it
+wait_for 'MockGPT.*SENT:' 10 || true
+user_tap scroll_top # back up to the earlier reply, as the new one comes in below
+wait_for 'MockGPT.*TAP read aloud' 30 || true
+CAPTURE="$(capture_now)"
+collect
+check "the chat was scrolled up as the new reply came in" in_order 'MockGPT.*USER taps scroll_top' 'MockGPT.*REPLY DONE'
+check "scrolls the chat back down once the reply is done" in_order 'MockGPT.*REPLY DONE' 'scrolled the chat down'
+check "then presses the new reply's Read aloud" in_order 'scrolled the chat down' 'MockGPT.*TAP read aloud \(reply 2\)'
+expect_not "not the earlier one's, which was on screen" 'MockGPT.*TAP read aloud \(reply 1\)'
+check "a capture shows the chat, at the bottom" has '^Chat: .* SCROLL\(up,back\)$' <<<"$CAPTURE"
+handsfree STOP
+app_settings --ez read_aloud false
 
 step "Stability"
 check "no crashes" test "$(adb_ logcat -d -b crash | grep -c 'com.handsfreegpt' || true)" -eq 0

@@ -22,7 +22,8 @@ import android.util.Log
  *   FINISHING  → wait for the transcript to land in the text box, remove a spoken command, send, check it went.
  *                After ↑, or a dictation ended in ChatGPT itself (its own X, ■ or ↑), see what came of it
  *   WAIT_REPLY → (continuous or read aloud) once ChatGPT has taken a message, wait for the reply to finish
- *   READING    → (read aloud) press ChatGPT's Read aloud, wait until it stops speaking, then listen again
+ *   READING    → (read aloud) scroll the chat to the bottom, press the latest reply's Read aloud, wait until
+ *                it stops speaking, then listen again
  *   READY      → paused; tap the floating pill or press play to talk again
  *
  * Everything runs on the main thread, driven by a 250 ms tick while a session is active.
@@ -68,6 +69,7 @@ class DictationController(
     private var readBasePlayers = 0 // audio players already active then
     private var readStarted = false
     private var readRetried = false
+    private var readScrolls = 0 // times we scrolled the chat down before pressing Read aloud
     private var quietSince = 0L // when ChatGPT stopped speaking; reading counts as done once it stays quiet
     private var stopAfterRead: State? = null // stopped before the speech began: stop it once it does, then go here
     private var pausePressedAt = 0L // we paused the reply, so ChatGPT's play button means paused, not ended
@@ -237,6 +239,7 @@ class DictationController(
         readBasePlayers = 0
         readStarted = false
         readRetried = false
+        readScrolls = 0
         quietSince = 0
         stopAfterRead = null
         pausePressedAt = 0
@@ -413,6 +416,13 @@ class DictationController(
         }
         val r = ui.readAloud() ?: return
         if (readPressedAt == 0L) {
+            // Read aloud sits under the latest reply, at the bottom of the chat, and ChatGPT only shows what's on
+            // screen. If the chat is scrolled up, scroll it back down first, rather than press an older reply's (#17).
+            if (readScrolls < MAX_READ_SCROLLS && ui.scrollChatDown()) {
+                readScrolls++
+                stateSince = now // the time to find the button starts at the bottom
+                return
+            }
             when {
                 r.read != null -> {
                     readBasePlayers = players() // already playing (our silence, navigation…), so not ChatGPT
@@ -866,6 +876,7 @@ class DictationController(
         const val NOTHING_CAME_MS = 2000L // idle and quiet this long after a dictation, so nothing more is coming
         const val SEND_TAKES_MS = 8000L // how long ChatGPT may take to transcribe and send a dictation after ↑
         const val READ_FIND_MS = 5000L
+        const val MAX_READ_SCROLLS = 30 // a screen each, a tick apart: about 8 s from far up a long chat
         const val READ_START_MS = 8000L // ChatGPT fetches the speech before it starts
         const val READ_DONE_QUIET_MS = 2000L
         const val READ_MAX_MS = 10 * 60_000L
