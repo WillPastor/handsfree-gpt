@@ -359,9 +359,17 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
     /**
      * Text dump of ChatGPT's accessibility tree, for fixing button matching. Chat text only shows its length,
      * and layout wrappers with nothing of their own are left out, so a capture fits in a message.
+     *
+     * With [labels] (debug walks over adb), short text that belongs to something you can tap or long-press, such
+     * as a menu item, a chip or a chat's title, is shown instead of its length.
      */
-    fun dump(reason: String): String = buildString {
-        append("HandsFree GPT UI capture — ").append(Date()).append(" — ").append(reason).append('\n')
+    fun dump(reason: String, labels: Boolean = false): String = buildString {
+        // Outside a session the service only hears about window changes, so its cached copy of ChatGPT's screen
+        // goes out of date when ChatGPT changes screens in place. Clearing it makes the capture read it afresh.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) service.clearCache()
+        append("HandsFree GPT UI capture — ").append(Date()).append(" — ").append(reason)
+        if (labels) append(" — short labels shown")
+        append('\n')
         append("Android ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append("), ")
         append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
         val version = runCatching { service.packageManager.getPackageInfo(PKG, 0).versionName }.getOrNull()
@@ -376,24 +384,31 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
             append("== window type=").append(w.type).append(" active=").append(w.isActive)
             append(" package=").append(r?.packageName).append('\n')
             if (r == null || r.packageName != PKG) continue
-            lines = dumpNode(r, 0, 0, lines)
+            lines = dumpNode(r, 0, 0, lines, labels, inTappable = false)
         }
     }
 
-    /** Prints [n] at [depth] and its children below it. [level] is how deep it really is in the tree. */
-    private fun StringBuilder.dumpNode(n: AccessibilityNodeInfo, depth: Int, level: Int, linesSoFar: Int): Int {
+    /**
+     * Prints [n] at [depth] and its children below it. [level] is how deep it really is in the tree.
+     * [inTappable] says whether [n] or something it sits in can be tapped or long-pressed.
+     */
+    private fun StringBuilder.dumpNode(
+        n: AccessibilityNodeInfo, depth: Int, level: Int, linesSoFar: Int, labels: Boolean, inTappable: Boolean,
+    ): Int {
         if (linesSoFar > 4000 || level > 150) return linesSoFar
         val cls = n.className?.toString()?.substringAfterLast('.') ?: "?"
+        val tappable = inTappable || n.isClickable || n.isLongClickable
         if (n.childCount <= 1 && plain(n, cls)) {
             val child = if (n.childCount == 1) n.getChild(0) else null
-            return child?.let { dumpNode(it, depth, level + 1, linesSoFar) } ?: linesSoFar
+            return child?.let { dumpNode(it, depth, level + 1, linesSoFar, labels, tappable) } ?: linesSoFar
         }
         var lines = linesSoFar + 1
         val r = Rect().also { n.getBoundsInScreen(it) }
+        val label = labels && tappable
         append("  ".repeat(depth)).append(cls)
         n.viewIdResourceName?.let { append(" id=").append(it.substringAfter(":id/")) }
-        n.contentDescription?.let { append(" desc=").append(quoted(it, n, cls)) }
-        n.text?.let { append(" text=").append(quoted(it, n, cls)) }
+        n.contentDescription?.let { append(" desc=").append(quoted(it, n, cls, label)) }
+        n.text?.let { append(" text=").append(quoted(it, n, cls, label)) }
         n.hintText?.let { append(" hint=\"").append(it.take(60)).append('"') }
         n.rangeInfo?.let { append(" range=").append(it.min).append("..").append(it.max).append(" at ").append(it.current) }
         if (n.isClickable) append(" CLICK")
@@ -403,19 +418,22 @@ class ChatGptUi(private val service: AccessibilityService, private val prefs: Pr
         if (!n.isVisibleToUser) append(" HIDDEN")
         if (n.isScrollable) append(" SCROLL").append(scrollWays(n))
         append(' ').append(r.toShortString()).append('\n')
-        for (i in 0 until n.childCount) n.getChild(i)?.let { lines = dumpNode(it, depth + 1, level + 1, lines) }
+        for (i in 0 until n.childCount) {
+            n.getChild(i)?.let { lines = dumpNode(it, depth + 1, level + 1, lines, labels, tappable) }
+        }
         return lines
     }
 
     /**
      * A label or text as it goes in a capture. Chat text and what's in the text box only show their length:
      * ChatGPT repeats each paragraph in its description, so both are checked. Text without letters, such as
-     * the audio bar's time, is kept.
+     * the audio bar's time, is kept. With [label], short text is kept too, apart from what's typed in a box.
      */
-    private fun quoted(s: CharSequence, n: AccessibilityNodeInfo, cls: String): String {
+    private fun quoted(s: CharSequence, n: AccessibilityNodeInfo, cls: String, label: Boolean): String {
         val typed = n.isEditable && !n.isShowingHintText
         val chat = typed || (!n.isClickable && (s.length > 40 || (cls == "TextView" && s.any(Char::isLetter))))
-        return if (chat && s.isNotEmpty()) "[${s.length} chars]" else "\"${s.take(60)}\""
+        val hidden = chat && !(label && !typed && s.length <= 40)
+        return if (hidden && s.isNotEmpty()) "[${s.length} chars]" else "\"${s.take(60)}\""
     }
 
     /** A layout wrapper with nothing of its own to show. Most of a Compose tree is these. */

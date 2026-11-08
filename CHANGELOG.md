@@ -3,6 +3,13 @@
 Notable changes to this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A capture always shows the screen as it is.** On Android 13 and newer, a capture now reads ChatGPT's screen
+  afresh. Before, if ChatGPT had changed screens in place, a capture could show the screen before.
+
 ## [0.4.0] - 2026-11-07
 
 Pausing to think no longer ends a dictation: the app waits for a minute of quiet, and a single dictation can last

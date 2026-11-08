@@ -70,8 +70,9 @@ user_tap() { # tap the mock as a person would: its dictation bar's cancel (X), s
   adb_ shell am broadcast -a com.openai.chatgpt.USER_TAP -p com.openai.chatgpt --es target "$1" >/dev/null
 }
 no_voice() { grep -q 'voice commands unavailable' "$LOG"; }
-capture_now() { # capture ChatGPT's screen, as the app's Capture button does, and print the capture
-  adb_ shell am broadcast -n com.handsfreegpt/.DebugCaptureReceiver >/dev/null
+capture_now() { # capture ChatGPT's screen, as the app's Capture button does, and print the capture; with an
+  # argument of labels, short names inside things you can tap are shown too, as when mapping ChatGPT by hand
+  adb_ shell am broadcast -n com.handsfreegpt/.DebugCaptureReceiver ${1:+--ez labels true} >/dev/null
   sleep 1
   shell run-as com.handsfreegpt cat files/last_capture.txt
 }
@@ -538,6 +539,32 @@ expect_not "not the earlier one's, which was on screen" 'MockGPT.*TAP read aloud
 check "a capture shows the chat, at the bottom" has '^Chat: .* SCROLL\(up,back\)$' <<<"$CAPTURE"
 handsfree STOP
 app_settings --ez read_aloud false
+
+step "23. Captures show ChatGPT as it is, even after it changed screens in place with hands-free off; short labels still leave out chat text"
+# The real app's in-place changes didn't reach the service, so its captures went stale until they cleared its
+# cache. The mock's changes do reach it, so this checks captures keep up rather than reproducing that.
+shell am force-stop com.openai.chatgpt
+shell am start -n com.openai.chatgpt/.MainActivity --ez odd false --ez ignore_send false --es transcript "'$SAID'" \
+  --ei read_delay 800 --ez replied true --ez quick false --ez long false >/dev/null # stays in front this time
+sleep 2
+BEFORE="$(capture_now)"
+read -r MIC_X MIC_Y <<<"$(sed -nE 's/^  mic="[^"]*" \[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\].*/\1 \2 \3 \4/p' \
+  <<<"$BEFORE" | awk '{ print int(($1 + $3) / 2), int(($2 + $4) / 2) }')"
+begin
+shell input tap "${MIC_X:-0}" "${MIC_Y:-0}" # a dictation started in ChatGPT itself, which hands-free doesn't hear of
+sleep 1
+AFTER="$(capture_now)"
+user_tap cancel
+sleep 1
+LABELLED="$(capture_now labels)"
+collect
+check "a capture shows ChatGPT ready to dictate" has '^Detected: IDLE$' <<<"$BEFORE"
+check "and only the length of the name inside a tappable row" has 'text=\[9 chars\]' <<<"$BEFORE"
+expect "a dictation then starts in ChatGPT itself" 'MockGPT.*TAP mic -> dictation started'
+check "a capture straight after shows its dictation bar, not the screen before" has '^Detected: DICTATING$' <<<"$AFTER"
+check "with short labels, the row's name shows" has 'text="Mock chat"' <<<"$LABELLED"
+check "but chat text still shows only its length" lacks 'earlier (question|reply)|Stop reading here' <<<"$LABELLED"
+shell input keyevent KEYCODE_HOME
 
 step "Stability"
 check "no crashes" test "$(adb_ logcat -d -b crash | grep -c 'com.handsfreegpt' || true)" -eq 0
