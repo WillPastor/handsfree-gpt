@@ -212,7 +212,8 @@ class DictationController(
     }
 
     /** Dumps ChatGPT's current UI (for tuning the button matching). */
-    fun capture(reason: String): String = ui.dump(reason).also { service.saveCapture(it) }
+    fun capture(reason: String, labels: Boolean = false): String =
+        ui.dump(reason, labels).also { service.saveCapture(it) }
 
     fun shutdown() {
         endSession()

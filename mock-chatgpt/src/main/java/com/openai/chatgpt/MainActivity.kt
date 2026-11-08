@@ -187,9 +187,15 @@ class MainActivity : Activity() {
             addView(composer)
             addView(bar)
         }
+        // A row whose name is plain text inside it, like the real app's side panel rows and chats' titles.
+        val title = LinearLayout(this).apply {
+            addView(message(TITLE))
+            setOnClickListener { Log.i(TAG, "TAP title") }
+        }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
+            addView(title, LinearLayout.LayoutParams(-1, -2))
             addView(audioBar, LinearLayout.LayoutParams(-1, -2))
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(bottom, LinearLayout.LayoutParams(-1, -2))
@@ -452,6 +458,7 @@ class MainActivity : Activity() {
         const val TRANSCRIBE_MS = 2000L
         const val DEFAULT_TRANSCRIPT = "Hello from dictation. Send it."
         const val LAST_PARAGRAPH = "Stop reading here if you like: that's all done."
+        const val TITLE = "Mock chat"
         const val LONG_REPLY_WORDS = 80
         const val READ_MS = 6000
         const val SPEECH_TICK_MS = 100

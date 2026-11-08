@@ -70,7 +70,9 @@ stateDiagram-v2
 When a button can't be found or a step times out, the app saves a UI capture, shows the problem in amber on
 the pill, and goes back to `READY`. A capture starts with what the app detected, read-aloud controls included,
 then lists ChatGPT's accessibility tree. Layout wrappers with nothing of their own are left out, so a capture
-fits in a message. Chat text and the text box show only their length.
+fits in a message. Chat text and the text box show only their length. On Android 13 and newer, a capture first
+clears the service's cached copy of the screen. Outside a session the service only hears about window changes,
+so without that, a capture taken after ChatGPT changed screens in place could show the screen before.
 
 ## Reading ChatGPT's screen
 
@@ -257,7 +259,7 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
 | Layer | Covers | How |
 |---|---|---|
 | Unit | `SpeechTracker`, `CommandMatcher`, `stripTrailingCommand` | JUnit with synthetic loudness traces and transcripts (17 tests). |
-| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (95 checks). |
+| End to end | The whole app against [`mock-chatgpt`](../mock-chatgpt) | [`scripts/e2e.sh`](../scripts/e2e.sh) on an emulator, asserting on logcat from both apps (101 checks). |
 | Static | Android Lint | `./gradlew lint`, with zero issues in both modules. |
 | CI | All of the above except the emulator run | [GitHub Actions](../.github/workflows/ci.yml). |
 
@@ -285,11 +287,15 @@ itself ([#3](https://github.com/WillPastor/handsfree-gpt/issues/3)).
   comes in. Its *long* mode makes replies taller than the screen, so an earlier reply's Read aloud can be on
   screen while the new one's isn't.
 - A test can tap the dictation bar's own X, ■ and ↑ too, and start the mock with a reply already in the chat.
+- Its top row is something to tap whose name is plain text inside it, like the real app's side panel rows, so a
+  test can check what a capture shows of such a name.
 - Its *odd labels* mode renames or removes labels to exercise the position fallback. Its *ignore send* mode
   makes the send arrow do nothing, to test that the app says so instead of "Sent". What its dictations
   transcribe to can be set too, including nothing at all.
 - Debug builds have receivers, restricted to adb, that switch settings and take captures, so scenarios can turn
-  on continuous mode and read aloud, and check what a capture shows.
+  on continuous mode and read aloud, and check what a capture shows. For mapping ChatGPT's screens by hand, a
+  capture can also show the short names of things you can tap or long-press (`--ez labels true`), such as menu
+  items and chats' titles. A short message you sent can be tapped too, so it isn't for open chats.
 
 ## Design choices
 
