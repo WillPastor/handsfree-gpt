@@ -20,10 +20,11 @@
 
 ---
 
-ChatGPT's voice mode is convenient, but it answers when you pause, and its own voice model runs the conversation,
-deciding which questions to pass to the text models. **Dictation** turns what you say into an ordinary message for
-the model you picked, with full reasoning and long answers, sent when you're done. The catch is that it needs a
-tap to start and another to stop, which doesn't work when your hands are on the steering wheel.
+ChatGPT's voice mode is convenient, but it decides when you've finished: it may answer during a long pause or
+when someone else speaks. Its own voice model also runs the conversation, deciding which questions to pass to
+the text models. **Dictation** turns what you say into an ordinary message for the model you picked, with full
+reasoning and long answers, sent when you're done. The catch is that it needs a tap to start and another to
+stop, which doesn't work when your hands are on the steering wheel.
 
 **HandsFree GPT does the tapping.** It starts ChatGPT's dictation, then finishes it in whichever of these
 happens first:
@@ -78,6 +79,32 @@ tests. The live words come from Android's on-device recogniser hearing a synthes
 - **Robust button finding.** Buttons are matched by accessibility label, with button position as a fallback.
   If a button can't be found, the app saves a capture of ChatGPT's layout so the matching can be fixed.
 - **Private by design.** No internet permission, and recognition happens on the device. See [Privacy](#privacy).
+
+## Voice mode or this?
+
+ChatGPT's own [voice mode](https://help.openai.com/en/articles/20001274-chatgpt-voice) keeps getting better, but
+it still decides when you've finished and which model answers. HandsFree GPT leaves both to you. Here's how the
+two compare.
+
+| | ChatGPT's voice mode | Dictation with HandsFree GPT |
+| --- | --- | --- |
+| **When your message ends** | It decides. You can ask it to wait, but a long pause or background speech may still make it answer. | When you say "send it" or press the button, or after a minute of quiet (see below). |
+| **Other people talking** | It isn't built for several speakers yet, and may answer when people talk to each other. | Their words go into your message too, but nothing answers until it's sent. |
+| **Which model answers** | Its voice model runs the conversation and passes complex questions to the text models. | Every message goes to the model you picked. |
+| **Limits** | Capped by plan: 3 hours in any 24 on Plus. | A dictation becomes an ordinary message, and OpenAI's help pages give dictation no cap of its own. |
+| **In the car** | CarPlay. OpenAI's help pages don't mention Android Auto. | Steering-wheel and headset buttons, and Android Auto's media screen (not yet tried in a car). |
+| **The phone** | Works locked, or with another app on screen. | Has to be unlocked with ChatGPT on screen. |
+
+A dictation also ends after a minute of quiet, unless you turn silence detection off, and when it reaches the
+longest dictation you've set, just under 10 minutes by default. With auto-send and continuous mode off, that
+leaves your words in ChatGPT's box for you to send. With either one on, it sends them. Saying "send it" or
+pressing ⏭ always sends.
+
+This is how things stood in November 2026. OpenAI
+[draws the same line](https://help.openai.com/en/articles/20001274-chatgpt-voice#when-should-i-use-voice-instead-of-dictation):
+voice for a live conversation, and
+[dictation](https://help.openai.com/en/articles/12168547-voice-dictation-faq) to record a prompt and send it as
+text.
 
 ## How it works
 
